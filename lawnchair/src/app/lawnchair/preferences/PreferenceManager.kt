@@ -78,6 +78,11 @@ class PreferenceManager @Inject constructor(
     val shadowBGIcons = BoolPref("pref_shadowBGIcons", true)
     val addIconToHome = BoolPref("pref_add_icon_to_home", true)
 
+    // Metro: Windows Phone-style live tiles on the home screen
+    val metroTiles = BoolPref("pref_metroTiles", true, recreate)
+    val metroFrostedTiles = BoolPref("pref_metroFrostedTiles", false, recreate)
+    val metroBlackBackground = BoolPref("pref_metroBlackBackground", false, recreate)
+
     private val isPhone: Boolean get() = deviceType == InvariantDeviceProfile.TYPE_PHONE
     private val isTablet: Boolean get() = deviceType == InvariantDeviceProfile.TYPE_TABLET
     private val isFoldable: Boolean get() = deviceType == InvariantDeviceProfile.TYPE_MULTI_DISPLAY

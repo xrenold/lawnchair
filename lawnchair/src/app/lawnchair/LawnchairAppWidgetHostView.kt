@@ -2,12 +2,17 @@ package app.lawnchair
 
 import android.appwidget.AppWidgetProviderInfo
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.RectF
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.widget.RemoteViews
+import app.lawnchair.metro.MetroTiles
 import app.lawnchair.smartspace.SmartspaceAppWidgetProvider
+import com.android.launcher3.LauncherSettings
+import com.android.launcher3.model.data.ItemInfo
 import com.android.launcher3.R
 import com.android.launcher3.util.Themes
 import com.android.launcher3.widget.LauncherAppWidgetHostView
@@ -52,6 +57,32 @@ class LawnchairAppWidgetHostView @JvmOverloads constructor(
     override fun getErrorView(): View {
         if (customView != null) return getEmptyView()
         return super.getErrorView()
+    }
+
+    private val metroTileRect = RectF()
+
+    /**
+     * Metro: embedded widgets on the home screen sit inside a tile like app icons do.
+     * The smartspace widget and widget-picker previews are left untouched.
+     */
+    private fun isMetroTile(): Boolean {
+        if (previewMode || customView != null) return false
+        val info = tag as? ItemInfo ?: return false
+        if (info.container != LauncherSettings.Favorites.CONTAINER_DESKTOP) return false
+        return MetroTiles.isEnabled(context)
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        if (!isMetroTile()) {
+            super.dispatchDraw(canvas)
+            return
+        }
+        MetroTiles.drawBackground(this, canvas)
+        MetroTiles.getTileRect(this, metroTileRect)
+        val save = canvas.save()
+        canvas.clipRect(metroTileRect)
+        super.dispatchDraw(canvas)
+        canvas.restoreToCount(save)
     }
 
     private fun getEmptyView(): View {

@@ -1070,4 +1070,13 @@
     <string name="lawnchair_action_failed">Failed to trigger action</string>
 
     <string name="please_wait">Please wait…</string>
+
+    <!-- Metro tiles -->
+    <string name="metro_tiles_heading">Metro tiles</string>
+    <string name="metro_tiles_label">Live tile home screen</string>
+    <string name="metro_tiles_description">Show home screen apps and widgets as Windows Phone-style tiles</string>
+    <string name="metro_frosted_tiles_label">Frosted tiles</string>
+    <string name="metro_frosted_tiles_description">See-through tiles that show the wallpaper, instead of solid accent color</string>
+    <string name="metro_black_background_label">Black background</string>
+    <string name="metro_black_background_description">Replace the wallpaper on the home screen with solid black</string>
 </resources>

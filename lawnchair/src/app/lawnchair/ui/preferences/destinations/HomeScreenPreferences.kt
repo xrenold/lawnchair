@@ -101,6 +101,26 @@ fun HomeScreenPreferences(
                 description = stringResource(id = R.string.infinite_scrolling_description),
             )
         }
+        PreferenceGroup(heading = stringResource(id = R.string.metro_tiles_heading)) {
+            val metroTilesAdapter = prefs.metroTiles.getAdapter()
+            SwitchPreference(
+                adapter = metroTilesAdapter,
+                label = stringResource(id = R.string.metro_tiles_label),
+                description = stringResource(id = R.string.metro_tiles_description),
+            )
+            ExpandAndShrink(visible = metroTilesAdapter.state.value) {
+                SwitchPreference(
+                    adapter = prefs.metroFrostedTiles.getAdapter(),
+                    label = stringResource(id = R.string.metro_frosted_tiles_label),
+                    description = stringResource(id = R.string.metro_frosted_tiles_description),
+                )
+            }
+            SwitchPreference(
+                adapter = prefs.metroBlackBackground.getAdapter(),
+                label = stringResource(id = R.string.metro_black_background_label),
+                description = stringResource(id = R.string.metro_black_background_description),
+            )
+        }
         PreferenceGroup(heading = stringResource(id = R.string.home_screen_actions)) {
             ClickablePreference(
                 label = stringResource(id = R.string.remove_all_views_from_home_screen),

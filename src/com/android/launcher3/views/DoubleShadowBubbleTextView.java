@@ -103,6 +103,10 @@ public class DoubleShadowBubbleTextView extends BubbleTextView {
 
     @Override
     public void onDraw(Canvas canvas) {
+        // Metro: home screen icons are drawn as tiles without text shadows.
+        if (drawMetroTileIfNeeded(canvas)) {
+            return;
+        }
         if (shouldDrawAppContrastTile() && !TextUtils.isEmpty(getText())) {
             drawAppContrastTile(canvas);
         }

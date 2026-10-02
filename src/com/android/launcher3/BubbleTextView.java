@@ -949,6 +949,8 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
     }
 
     private final Rect mMetroIconBounds = new Rect();
+    /** Icon size as a fraction of the tile's shorter side. */
+    private static final float METRO_ICON_SCALE = 0.42f;
 
     /**
      * Metro: draws the tile background, the centered icon and a bottom-left label.
@@ -962,16 +964,17 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
         }
         MetroTiles.drawBackground(this, canvas);
 
-        getPaint().clearShadowLayer();
-        getIconBounds(mMetroIconBounds);
-        canvas.save();
-        canvas.clipRect(
-                getScrollX() + mMetroIconBounds.left,
-                getScrollY() + mMetroIconBounds.top,
-                getScrollX() + mMetroIconBounds.right,
-                getScrollY() + mMetroIconBounds.bottom);
-        drawWithoutDot(canvas);
-        canvas.restore();
+        // Metro icons are small and centred, sitting slightly above the label.
+        FastBitmapDrawable icon = getIcon();
+        if (icon != null) {
+            icon.copyBounds(mMetroIconBounds);
+            int size = (int) (Math.min(getWidth(), getHeight()) * METRO_ICON_SCALE);
+            int left = getScrollX() + (getWidth() - size) / 2;
+            int top = getScrollY() + (getHeight() - size) / 2 - getHeight() / 20;
+            icon.setBounds(left, top, left + size, top + size);
+            icon.draw(canvas);
+            icon.setBounds(mMetroIconBounds);
+        }
 
         MetroTiles.drawLabel(this, canvas, getText(), Color.alpha(getCurrentTextColor()));
         drawDotIfNecessary(canvas);

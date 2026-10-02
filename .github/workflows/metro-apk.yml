@@ -1,0 +1,51 @@
+name: Metro APK
+
+# Builds an installable debug APK of the Metro launcher on every push to the
+# metro branch (or on demand from the Actions tab). Download it from the run's
+# "Artifacts" section.
+
+on:
+  push:
+    branches:
+      - 'metro'
+      - 'metro-*'
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: metro-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Use a fixed debug key so each new APK installs over the previous one
+      # instead of failing with a signature mismatch.
+      - name: Install fixed debug keystore
+        run: |
+          mkdir -p ~/.android
+          cp metro/debug.keystore ~/.android/debug.keystore
+
+      - name: Build APK
+        run: ./gradlew assembleLawnWithQuickstepGithubDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: metro-launcher-debug
+          path: build/outputs/apk/**/*.apk
+          if-no-files-found: error

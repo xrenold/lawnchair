@@ -226,7 +226,7 @@ android {
         }
 
         debug {
-            applicationIdSuffix ".debug"
+            // Metro: debug builds are the builds we ship, so no ".debug" suffix.
             resValue("string", "derived_app_name", "Metro")
 
             manifestPlaceholders.quickstepMinSdk = "0"
@@ -267,7 +267,8 @@ android {
         }
 
         github {
-            applicationId 'app.lawnchair'
+            // Metro: own package so it installs alongside (not over) Lawnchair.
+            applicationId 'app.metro.launcher'
             dimension "channel"
         }
 

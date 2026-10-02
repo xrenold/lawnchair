@@ -171,6 +171,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         DragController.DragListener, Insettable, StateHandler<LauncherState>,
         WorkspaceLayoutManager, LauncherBindableItemsContainer, LauncherOverlayCallbacks {
 
+    // Metro: the Start screen replaces this view, so it stays hidden while Metro is on.
+    @Override
+    public void draw(android.graphics.Canvas canvas) {
+        if (app.lawnchair.metro.MetroMode.isStartEnabled(getContext())) {
+            return;
+        }
+        super.draw(canvas);
+    }
+
     /**
      * The value that {@link #mTransitionProgress} must be greater than for
      * {@link #transitionStateShouldAllowDrop()} to return true.

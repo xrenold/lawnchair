@@ -26,18 +26,22 @@ import android.os.Bundle
 import android.util.Pair
 import android.view.Display
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.window.SplashScreen
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
-import app.lawnchair.metro.MetroTiles
 import app.lawnchair.LawnchairApp.Companion.showQuickstepWarningIfNecessary
 import app.lawnchair.compat.LawnchairQuickstepCompat
 import app.lawnchair.data.AppDatabase
 import app.lawnchair.data.wallpaper.service.WallpaperService
 import app.lawnchair.gestures.GestureController
 import app.lawnchair.gestures.VerticalSwipeTouchController
+import app.lawnchair.metro.MetroMode
+import app.lawnchair.metro.start.MetroTouchGate
+import app.lawnchair.metro.start.PinToStartShortcut
+import app.lawnchair.metro.start.StartView
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.gestures.ui.LawnchairShortcutActivity
 import app.lawnchair.nexuslauncher.OverlayCallbackImpl
@@ -97,6 +101,10 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 class LawnchairLauncher : QuickstepLauncher() {
+    /** Metro Start screen, present when Metro is enabled. */
+    var startView: StartView? = null
+        private set
+
     private val defaultOverlay by unsafeLazy { OverlayCallbackImpl(this) }
     private val prefs by unsafeLazy { PreferenceManager.getInstance(this) }
     private val preferenceManager2 by unsafeLazy { PreferenceManager2.getInstance(this) }
@@ -162,9 +170,8 @@ class LawnchairLauncher : QuickstepLauncher() {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
 
-        // Metro: optional solid black home screen instead of the wallpaper.
-        if (MetroTiles.useBlackBackground(this)) {
-            dragLayer.setBackgroundColor(android.graphics.Color.BLACK)
+        if (MetroMode.isStartEnabled(this)) {
+            addStartView()
         }
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
@@ -267,7 +274,29 @@ class LawnchairLauncher : QuickstepLauncher() {
             }
         }
 
+        val alreadyHome = isInState(LauncherState.NORMAL) && hasWindowFocus()
         super.onNewIntent(intent)
+        // Metro: pressing Home while on Start scrolls back to the top, like the WP Start button.
+        if (alreadyHome && intent?.hasCategory(Intent.CATEGORY_HOME) == true) {
+            startView?.scrollToTop()
+        }
+    }
+
+    /** Puts the Start screen above the (hidden) workspace and dock, below the drawer and overview. */
+    private fun addStartView() {
+        val layer = dragLayer
+        val anchor = findViewById<View>(R.id.page_indicator) ?: hotseat
+        val index = layer.indexOfChild(anchor).let { if (it < 0) 1 else it + 1 }
+        val view = StartView(this)
+        layer.addView(
+            view,
+            index,
+            com.android.launcher3.views.BaseDragLayer.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        startView = view
     }
 
     override fun collectStateHandlers(out: MutableList<StateHandler<LauncherState>>) {
@@ -288,7 +317,7 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun getSupportedShortcuts(container: Int): Stream<SystemShortcut.Factory<*>> = Stream.concat(
         super.getSupportedShortcuts(container),
         Stream.concat(
-            Stream.of(LawnchairShortcut.UNINSTALL, LawnchairShortcut.CUSTOMIZE, LawnchairShortcut.OPEN_IN_STORE),
+            Stream.of(PinToStartShortcut.FACTORY, LawnchairShortcut.UNINSTALL, LawnchairShortcut.CUSTOMIZE, LawnchairShortcut.OPEN_IN_STORE),
             if (LawnchairApp.isRecentsEnabled) Stream.of(LawnchairShortcut.PAUSE_APPS) else Stream.empty(),
         ),
     )
@@ -314,7 +343,11 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun createTouchControllers(): Array<TouchController> {
         val verticalSwipeController = VerticalSwipeTouchController(this, gestureController)
-        return arrayOf<TouchController>(verticalSwipeController) + super.createTouchControllers()
+        val controllers = arrayOf<TouchController>(verticalSwipeController) + super.createTouchControllers()
+        if (!MetroMode.isStartEnabled(this)) return controllers
+        // Metro: on the Start screen, vertical swipes scroll the tiles instead of opening the
+        // drawer or notification shade. Controllers still work in the drawer and overview.
+        return controllers.map { if (it === dragController) it else MetroTouchGate(this, it) }.toTypedArray()
     }
 
     override fun handleHomeTap() {

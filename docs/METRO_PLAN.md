@@ -174,10 +174,11 @@ Every phase ends with a new APK on the `metro-latest` release.
 | 6 | Motion | Tilt, turnstile in and out, Start entrance, list slide |
 | 7 | Settings and polish | Metro settings pivots, per-tile options, backup and restore, cleanup of unused Lawnchair UI |
 
-## 12. Decisions to confirm
+## 12. Decisions (confirmed 2026-10-02)
 
-1. **Package and name.** `app.metro.launcher` and "Metro". The package change means a fresh install, so the home layout is set up again after import.
-2. **Default grid.** 6 columns ("show more tiles") or 4.
-3. **Default look.** Window mode (8.1 classic) or semi-transparent over the wallpaper.
-4. **Message peeks on tiles.** Showing message text on the home screen is a privacy risk, so it's off by default.
-5. **Folders.** WP 8.1 added tile folders. Drop folders for now, or build them as a later phase.
+1. Name **Metro**, package `app.metro.launcher`.
+2. Default grid **4 columns**, with "Show more tiles" for 6.
+3. Default background **black**. Wallpaper and 8.1 window mode are options.
+4. Message peeks on tiles: **on** by default (can be turned off).
+5. Folders: **skipped**.
+6. Font: Selawik ships only as source in Microsoft's repo, so the system sans-serif is used for now.

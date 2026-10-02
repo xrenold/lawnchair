@@ -78,10 +78,24 @@ class PreferenceManager @Inject constructor(
     val shadowBGIcons = BoolPref("pref_shadowBGIcons", true)
     val addIconToHome = BoolPref("pref_add_icon_to_home", true)
 
-    // Metro: Windows Phone-style live tiles on the home screen
+    // Metro: Windows Phone 8.1-style Start screen (see docs/METRO_PLAN.md)
     val metroTiles = BoolPref("pref_metroTiles", true, recreate)
-    val metroFrostedTiles = BoolPref("pref_metroFrostedTiles", false, recreate)
-    val metroBlackBackground = BoolPref("pref_metroBlackBackground", false, recreate)
+    /** "Show more tiles": 6 small-tile columns instead of 4. */
+    val metroShowMoreTiles = BoolPref("pref_metroShowMoreTiles", false, recreate)
+    /** "solid" or "translucent". */
+    val metroTileStyle = StringPref("pref_metroTileStyle", "solid", recreate)
+    /** Tile opacity in percent when [metroTileStyle] is translucent. */
+    val metroTileOpacity = IntPref("pref_metroTileOpacity", 60, recreate)
+    /** "black", "wallpaper" or "window" (black with wallpaper visible through tiles). */
+    val metroBackground = StringPref("pref_metroBackground", "black", recreate)
+    /** "monet" (single accent), "monet_tonal" (mixed Monet tones) or "classic". */
+    val metroColorMode = StringPref("pref_metroColorMode", "monet", recreate)
+    /** Name of the classic Windows Phone accent used when [metroColorMode] is "classic". */
+    val metroClassicAccent = StringPref("pref_metroClassicAccent", "cobalt", recreate)
+    /** Live tiles may show message text from notifications. */
+    val metroMessagePeek = BoolPref("pref_metroMessagePeek", true)
+    /** Serialized Start screen tiles (JSON). Managed by MetroTileStore. */
+    val metroStartTiles = StringPref("pref_metroStartTiles", "")
 
     private val isPhone: Boolean get() = deviceType == InvariantDeviceProfile.TYPE_PHONE
     private val isTablet: Boolean get() = deviceType == InvariantDeviceProfile.TYPE_TABLET

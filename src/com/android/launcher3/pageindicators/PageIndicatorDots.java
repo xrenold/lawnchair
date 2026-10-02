@@ -64,6 +64,15 @@ import app.lawnchair.theme.color.tokens.ColorTokens;
  * WorkspacePageIndicator. A lot of the functionality in this class is only used by one UI purpose.
  */
 public class PageIndicatorDots extends View implements Insettable, PageIndicator {
+
+    // Metro: the Start screen replaces this view, so it stays hidden while Metro is on.
+    @Override
+    public void draw(android.graphics.Canvas canvas) {
+        if (app.lawnchair.metro.MetroMode.isStartEnabled(getContext())) {
+            return;
+        }
+        super.draw(canvas);
+    }
     private static final float SHIFT_PER_ANIMATION = 0.5f;
     private static final float SHIFT_THRESHOLD = (enableLauncherVisualRefresh() ? 0.5f : 0.2f);
     private static final long ANIMATION_DURATION = (enableLauncherVisualRefresh() ? 200 : 150);

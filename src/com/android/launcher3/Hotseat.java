@@ -72,6 +72,15 @@ import app.lawnchair.preferences2.PreferenceManager2;
  */
 public class Hotseat extends FrameLayout implements Insettable {
 
+    // Metro: the Start screen replaces this view, so it stays hidden while Metro is on.
+    @Override
+    public void draw(android.graphics.Canvas canvas) {
+        if (app.lawnchair.metro.MetroMode.isStartEnabled(getContext())) {
+            return;
+        }
+        super.draw(canvas);
+    }
+
     public static final int ALPHA_CHANNEL_TASKBAR_ALIGNMENT = 0;
     public static final int ALPHA_CHANNEL_PREVIEW_RENDERER = 1;
     public static final int ALPHA_CHANNEL_TASKBAR_STASH = 2;

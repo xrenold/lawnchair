@@ -117,7 +117,6 @@ import app.lawnchair.preferences.PreferenceManager;
 import app.lawnchair.preferences2.PreferenceManager2;
 import app.lawnchair.util.LawnchairUtilsKt;
 import app.lawnchair.animation.PhysicsAnimator;
-import app.lawnchair.metro.MetroTiles;
 
 /**
  * TextView that draws a bubble behind the text. We cannot use a LineBackgroundSpan
@@ -922,63 +921,9 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
 
     @Override
     public void onDraw(Canvas canvas) {
-        if (drawMetroTileIfNeeded(canvas)) {
-            return;
-        }
         super.onDraw(canvas);
         drawDotIfNecessary(canvas);
         drawRunningAppIndicatorIfNecessary(canvas);
-    }
-
-    /**
-     * Metro: whether this icon is drawn as a Windows Phone-style tile. Only home screen
-     * (desktop) icons become tiles; the dock, folders and app drawer keep normal icons.
-     */
-    public boolean isMetroTile() {
-        if (mDisplay != DISPLAY_WORKSPACE) {
-            return false;
-        }
-        Object tag = getTag();
-        if (!(tag instanceof ItemInfo)) {
-            return false;
-        }
-        if (((ItemInfo) tag).container != LauncherSettings.Favorites.CONTAINER_DESKTOP) {
-            return false;
-        }
-        return MetroTiles.isEnabled(getContext());
-    }
-
-    private final Rect mMetroIconBounds = new Rect();
-    /** Icon size as a fraction of the tile's shorter side. */
-    private static final float METRO_ICON_SCALE = 0.42f;
-
-    /**
-     * Metro: draws the tile background, the centered icon and a bottom-left label.
-     * The default label under the icon is clipped away.
-     *
-     * @return true if the view was drawn as a tile and normal drawing should be skipped.
-     */
-    protected boolean drawMetroTileIfNeeded(Canvas canvas) {
-        if (!isMetroTile()) {
-            return false;
-        }
-        MetroTiles.drawBackground(this, canvas);
-
-        // Metro icons are small and centred, sitting slightly above the label.
-        FastBitmapDrawable icon = getIcon();
-        if (icon != null) {
-            icon.copyBounds(mMetroIconBounds);
-            int size = (int) (Math.min(getWidth(), getHeight()) * METRO_ICON_SCALE);
-            int left = getScrollX() + (getWidth() - size) / 2;
-            int top = getScrollY() + (getHeight() - size) / 2 - getHeight() / 20;
-            icon.setBounds(left, top, left + size, top + size);
-            icon.draw(canvas);
-            icon.setBounds(mMetroIconBounds);
-        }
-
-        MetroTiles.drawLabel(this, canvas, getText(), Color.alpha(getCurrentTextColor()));
-        drawDotIfNecessary(canvas);
-        return true;
     }
 
     /**
@@ -1129,15 +1074,6 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int height = MeasureSpec.getSize(heightMeasureSpec);
-        if (isMetroTile()) {
-            // Metro: icon sits in the middle of the tile; the label is drawn separately.
-            int top = Math.max(0, (height - mIconSize) / 2);
-            if (getPaddingTop() != top) {
-                setPadding(getPaddingLeft(), top, getPaddingRight(), getPaddingBottom());
-            }
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-            return;
-        }
         if (mCenterVertically) {
             Paint.FontMetrics fm = getPaint().getFontMetrics();
             int cellHeightPx = mIconSize + getCompoundDrawablePadding() +

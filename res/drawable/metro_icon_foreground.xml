@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Metro launcher icon: a small Start screen of white tiles. 108dp adaptive canvas,
+     artwork kept inside the 66dp safe zone (21..87). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- medium tile -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M33,33h20v20h-20z" />
+    <!-- two small tiles -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M55,33h9v9h-9z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M66,33h9v9h-9z" />
+    <path android:fillColor="#CCFFFFFF" android:pathData="M55,44h20v9h-20z" />
+    <!-- wide tile -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M33,55h42v20h-42z" />
+</vector>

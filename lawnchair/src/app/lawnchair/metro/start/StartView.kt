@@ -22,14 +22,16 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.PopupMenu
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import app.lawnchair.LawnchairLauncher
 import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.MetroTileStore
 import app.lawnchair.metro.data.TileSize
+import app.lawnchair.metro.live.LiveInfo
+import app.lawnchair.metro.live.LiveTileData
 import app.lawnchair.metro.theme.MetroTheme
+import app.lawnchair.preferences.PreferenceManager
 import com.android.launcher3.Insettable
 import com.android.launcher3.LauncherState
 import kotlin.math.abs
@@ -48,14 +50,15 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private val store = MetroTileStore.get(launcher)
     private var tiles: MutableList<MetroTile> = mutableListOf()
 
-    private val scroller = ScrollView(launcher).apply {
+    // Android's stretch overscroll is replaced by the Windows Phone edge bounce, which moves
+    // the tiles and the window-mode mask together.
+    private val scroller = BounceScrollView(launcher).apply {
         isVerticalScrollBarEnabled = false
-        // No stretch overscroll: it distorts the tiles but not the window-mode cut-outs
-        // drawn behind them, so the two would drift apart at the ends of the list.
-        overScrollMode = OVER_SCROLL_NEVER
         isFillViewport = true
         clipToPadding = false
     }
+    private val prefs = PreferenceManager.getInstance(launcher)
+    private var parallax: ParallaxBackgroundView? = null
     private val grid = TileGridView(launcher)
     private val arrow = TextView(launcher)
 
@@ -94,6 +97,16 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             launcher.showDefaultOptions(lastTouchX, lastTouchY)
             true
+        }
+        // WP 8.1 parallax: our own background photo, drifting slower than the tiles.
+        if (background != MetroTheme.BG_BLACK && prefs.metroBackgroundPhoto.get() > 0) {
+            val bg = ParallaxBackgroundView(launcher)
+            bg.load()
+            if (bg.hasImage) {
+                addView(bg, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+                parallax = bg
+                scroller.onScrollFraction = { bg.setScrollFraction(it) }
+            }
         }
         scroller.addView(grid, ViewGroup.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -135,9 +148,14 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         super.onAttachedToWindow()
         store.addListener(storeListener)
         colorListener = MetroTheme.Listener(launcher) { refreshColors() }
+        LiveTileData.addListener(launcher, liveListener)
+        removeCallbacks(liveTicker)
+        postDelayed(liveTicker, LIVE_TICK_MS)
     }
 
     override fun onDetachedFromWindow() {
+        removeCallbacks(liveTicker)
+        LiveTileData.removeListener(liveListener)
         store.removeListener(storeListener)
         colorListener?.close()
         colorListener = null
@@ -149,7 +167,50 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         tiles = store.load()
         grid.removeAllViews()
         tiles.forEach { grid.addView(createTileView(it)) }
+        applyLive(LiveTileData.snapshot)
         invalidate()
+    }
+
+    // ---- Live tiles -----------------------------------------------------------------------
+
+    private val liveListener: (Map<String, LiveInfo>) -> Unit = { applyLive(it) }
+
+    private fun applyLive(data: Map<String, LiveInfo>) {
+        for (i in 0 until grid.childCount) {
+            val tv = grid.getChildAt(i) as? TileView ?: continue
+            tv.live = data[tv.tile.component.packageName]
+        }
+    }
+
+    private val visibleRect = Rect()
+    private val random = java.util.Random()
+
+    /**
+     * Flip scheduler. Every couple of seconds, at most one on-screen tile flips: one that has
+     * shown its content long enough goes back to its icon, otherwise a random live tile that
+     * hasn't flipped for a while turns over. Tiles never flip in sync, as on Windows Phone, and
+     * nothing animates while Start is hidden.
+     */
+    private val liveTicker = object : Runnable {
+        override fun run() {
+            postDelayed(this, LIVE_TICK_MS + random.nextInt(900))
+            if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus()) return
+            val now = System.currentTimeMillis()
+            val onScreen = (0 until grid.childCount)
+                .mapNotNull { grid.getChildAt(it) as? TileView }
+                .filter { it.getLocalVisibleRect(visibleRect) && visibleRect.height() > it.height / 2 }
+
+            onScreen.filter { it.showingBack && now - it.lastFlipAt > it.backDwellMs }
+                .randomOrNull()?.let {
+                    it.flip()
+                    return
+                }
+            onScreen.filter { !it.showingBack && it.hasBackFace && now - it.lastFlipAt > 4000 }
+                .randomOrNull()?.let {
+                    it.backDwellMs = 5000L + random.nextInt(4000)
+                    it.flip()
+                }
+        }
     }
 
     /** Repaints every tile, e.g. after the Monet palette changed. */
@@ -260,5 +321,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_INFO = 103
         private const val GROUP_SIZE = 1
         private const val GROUP_COLOR = 2
+        private const val LIVE_TICK_MS = 2200L
     }
 }

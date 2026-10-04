@@ -94,6 +94,10 @@ class PreferenceManager @Inject constructor(
     val metroClassicAccent = StringPref("pref_metroClassicAccent", "cobalt", recreate)
     /** Tile icon size in percent of the default (100 = default). */
     val metroIconSize = IntPref("pref_metroIconSize", 100, recreate)
+    /** Bumped whenever the Start background photo changes, so Start reloads it. */
+    val metroBackgroundPhoto = IntPref("pref_metroBackgroundPhoto", 0, recreate)
+    /** Live tiles flip to show content. */
+    val metroLiveTiles = BoolPref("pref_metroLiveTiles", true, recreate)
     /** Live tiles may show message text from notifications. */
     val metroMessagePeek = BoolPref("pref_metroMessagePeek", true)
     /** Serialized Start screen tiles (JSON). Managed by MetroTileStore. */

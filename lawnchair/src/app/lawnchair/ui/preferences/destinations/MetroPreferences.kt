@@ -1,6 +1,17 @@
 package app.lawnchair.ui.preferences.destinations
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import app.lawnchair.metro.live.LiveTileData
+import app.lawnchair.metro.start.ParallaxBackgroundView
+import app.lawnchair.ui.preferences.components.controls.ClickablePreference
 import app.lawnchair.metro.theme.MetroTheme
 import app.lawnchair.preferences.getAdapter
 import app.lawnchair.preferences.preferenceManager
@@ -40,6 +51,44 @@ fun MetroPreferenceGroups() {
                     ListPreferenceEntry(MetroTheme.BG_WINDOW) { "Wallpaper through tiles (8.1)" },
                 ),
             )
+        }
+    }
+
+    ExpandAndShrink(visible = startEnabled.state.value && prefs.metroBackground.getAdapter().state.value != MetroTheme.BG_BLACK) {
+        PreferenceGroup(heading = "Background photo") {
+            val context = LocalContext.current
+            val photoVersion = prefs.metroBackgroundPhoto.getAdapter()
+            val hasPhoto = photoVersion.state.value > 0 && ParallaxBackgroundView.file(context).exists()
+            val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+                if (uri == null) return@rememberLauncherForActivityResult
+                val ok = runCatching {
+                    context.contentResolver.openInputStream(uri)!!.use { input ->
+                        ParallaxBackgroundView.file(context).outputStream().use { input.copyTo(it) }
+                    }
+                }.isSuccess
+                if (ok) {
+                    photoVersion.onChange(photoVersion.state.value + 1)
+                } else {
+                    Toast.makeText(context, "Couldn't use that photo", Toast.LENGTH_SHORT).show()
+                }
+            }
+            ClickablePreference(
+                label = if (hasPhoto) "Change background photo" else "Choose background photo",
+                subtitle = "Shown behind the tiles with the Windows Phone 8.1 parallax drift. " +
+                    "Android doesn't let launchers move the system wallpaper this way.",
+                onClick = {
+                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+            )
+            ExpandAndShrink(visible = hasPhoto) {
+                ClickablePreference(
+                    label = "Use system wallpaper instead",
+                    onClick = {
+                        ParallaxBackgroundView.file(context).delete()
+                        photoVersion.onChange(0)
+                    },
+                )
+            }
         }
     }
 
@@ -94,6 +143,24 @@ fun MetroPreferenceGroups() {
 
     ExpandAndShrink(visible = startEnabled.state.value) {
         PreferenceGroup(heading = "Live tiles") {
+            val context = LocalContext.current
+            SwitchPreference(
+                adapter = prefs.metroLiveTiles.getAdapter(),
+                label = "Live tiles",
+                description = "Tiles flip to show new messages and what's playing",
+            )
+            if (!LiveTileData.hasAccess()) {
+                ClickablePreference(
+                    label = "Allow notification access",
+                    subtitle = "Needed for live tiles and counts. On Samsung, also turn on " +
+                        "Settings › Notifications › App icon badges.",
+                    onClick = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    },
+                )
+            }
             SwitchPreference(
                 adapter = prefs.metroMessagePeek.getAdapter(),
                 label = "Show message text on tiles",

@@ -241,6 +241,7 @@ public class NotificationListener extends NotificationListenerService {
         onNotificationSettingsChanged(mSettingsCache.getValue(NOTIFICATION_BADGING_URI));
 
         onNotificationFullRefresh();
+        app.lawnchair.metro.live.LiveTileData.onNotificationsChanged(this); // Metro live tiles
     }
 
     private void onNotificationSettingsChanged(boolean areNotificationDotsEnabled) {
@@ -261,6 +262,7 @@ public class NotificationListener extends NotificationListenerService {
         sIsConnected = false;
         mSettingsCache.unregister(NOTIFICATION_BADGING_URI, mNotificationSettingsChangedListener);
         onNotificationFullRefresh();
+        app.lawnchair.metro.live.LiveTileData.onNotificationsChanged(this); // Metro live tiles
     }
 
     @Override
@@ -268,6 +270,7 @@ public class NotificationListener extends NotificationListenerService {
         if (sbn != null) {
             mWorkerHandler.obtainMessage(MSG_NOTIFICATION_POSTED, sbn).sendToTarget();
             mNotificationManager.onNotificationPosted(sbn);
+            app.lawnchair.metro.live.LiveTileData.onNotificationsChanged(this); // Metro live tiles
         }
     }
 
@@ -276,6 +279,7 @@ public class NotificationListener extends NotificationListenerService {
         if (sbn != null) {
             mWorkerHandler.obtainMessage(MSG_NOTIFICATION_REMOVED, sbn).sendToTarget();
             mNotificationManager.onNotificationRemoved(sbn);
+            app.lawnchair.metro.live.LiveTileData.onNotificationsChanged(this); // Metro live tiles
         }
     }
 

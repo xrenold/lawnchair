@@ -4,11 +4,13 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.LauncherActivityInfo
 import android.content.pm.LauncherApps
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
@@ -42,8 +44,11 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         textSize = sp(13f)
     }
 
-    private var icon: Drawable? = null
+    /** Icon cropped to its visible artwork, so every app's glyph can be drawn at the same size. */
+    private var icon: Bitmap? = null
     private var iconIsMonochrome = false
+    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val iconRect = RectF()
     var label: CharSequence = ""
         private set
     private var activityInfo: LauncherActivityInfo? = null
@@ -83,11 +88,12 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
                 mono = full.monochrome
             }
             val text = runCatching { info?.label }.getOrNull() ?: target.packageName
+            val trimmed = runCatching { (mono ?: full)?.let(::renderTrimmed) }.getOrNull()
             MAIN.post {
                 if (tile.component != target) return@post
                 activityInfo = info
                 iconIsMonochrome = mono != null
-                icon = (mono ?: full)?.mutate()
+                icon = trimmed
                 label = text
                 contentDescription = text
                 invalidate()
@@ -111,22 +117,24 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
 
         val onColor = if (windowMode || MetroTheme.isTranslucent(context)) Color.WHITE else MetroTheme.onTileColor(base)
 
-        // Icon: small and centred, nudged up on tiles that show a label.
-        icon?.let { d ->
+        // Icon: every glyph gets the same box for a given tile size, measured from its visible
+        // artwork, so apps with padded or oversized icons line up with the rest.
+        icon?.let { bmp ->
             val showsLabel = tile.size != TileSize.SMALL
-            val shortSide = minOf(w, h)
-            val scale = when {
-                tile.size == TileSize.SMALL -> 0.56f
-                iconIsMonochrome -> 0.52f
-                else -> 0.40f
-            }
-            // Monochrome layers include adaptive-icon padding, so they're drawn larger.
-            val size = (if (tile.size == TileSize.WIDE || tile.size == TileSize.LARGE) h * 0.5f else shortSide) * scale
+            val cell = h / tile.size.rowSpan
+            val box = when (tile.size) {
+                TileSize.SMALL -> cell * 0.50f
+                TileSize.LARGE -> cell * 0.80f
+                else -> cell * 0.62f
+            } * (if (iconIsMonochrome) 1f else 0.9f) // full-colour shapes read heavier than glyphs
+            val scale = box / maxOf(bmp.width, bmp.height)
+            val iw = bmp.width * scale
+            val ih = bmp.height * scale
             val cx = w / 2f
             val cy = h / 2f - if (showsLabel) h * 0.05f else 0f
-            d.setBounds((cx - size / 2).toInt(), (cy - size / 2).toInt(), (cx + size / 2).toInt(), (cy + size / 2).toInt())
-            d.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
-            d.draw(canvas)
+            iconRect.set(cx - iw / 2f, cy - ih / 2f, cx + iw / 2f, cy + ih / 2f)
+            iconPaint.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
+            canvas.drawBitmap(bmp, null, iconRect, iconPaint)
         }
 
         // Label: bottom-left, hidden on small tiles (as on Windows Phone).
@@ -153,6 +161,38 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
 
     companion object {
+        private const val RENDER_SIZE = 256
+
+        /**
+         * Draws [d] into a bitmap and crops away transparent padding, leaving only the visible
+         * artwork. Icons are then scaled by that artwork, not by their padded canvas.
+         */
+        private fun renderTrimmed(d: Drawable): Bitmap {
+            val full = Bitmap.createBitmap(RENDER_SIZE, RENDER_SIZE, Bitmap.Config.ARGB_8888)
+            val c = Canvas(full)
+            d.setBounds(0, 0, RENDER_SIZE, RENDER_SIZE)
+            d.draw(c)
+            val px = IntArray(RENDER_SIZE * RENDER_SIZE)
+            full.getPixels(px, 0, RENDER_SIZE, 0, 0, RENDER_SIZE, RENDER_SIZE)
+            var minX = RENDER_SIZE
+            var minY = RENDER_SIZE
+            var maxX = -1
+            var maxY = -1
+            for (y in 0 until RENDER_SIZE) {
+                val row = y * RENDER_SIZE
+                for (x in 0 until RENDER_SIZE) {
+                    if ((px[row + x] ushr 24) > 24) {
+                        if (x < minX) minX = x
+                        if (x > maxX) maxX = x
+                        if (y < minY) minY = y
+                        if (y > maxY) maxY = y
+                    }
+                }
+            }
+            if (maxX < minX || maxY < minY) return full
+            return Bitmap.createBitmap(full, minX, minY, maxX - minX + 1, maxY - minY + 1)
+        }
+
         private val ICON_EXECUTOR = Executors.newSingleThreadExecutor()
         private val MAIN = Handler(Looper.getMainLooper())
     }

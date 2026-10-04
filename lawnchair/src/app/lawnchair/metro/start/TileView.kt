@@ -27,6 +27,7 @@ import androidx.core.graphics.ColorUtils
 import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.TileSize
 import app.lawnchair.metro.theme.MetroTheme
+import app.lawnchair.preferences.PreferenceManager
 import java.util.concurrent.Executors
 
 /**
@@ -122,11 +123,12 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         icon?.let { bmp ->
             val showsLabel = tile.size != TileSize.SMALL
             val cell = h / tile.size.rowSpan
+            val userScale = PreferenceManager.getInstance(context).metroIconSize.get() / 100f
             val box = when (tile.size) {
-                TileSize.SMALL -> cell * 0.50f
-                TileSize.LARGE -> cell * 0.80f
-                else -> cell * 0.62f
-            } * (if (iconIsMonochrome) 1f else 0.9f) // full-colour shapes read heavier than glyphs
+                TileSize.SMALL -> cell * 0.42f
+                TileSize.LARGE -> cell * 0.62f
+                else -> cell * 0.46f
+            } * userScale * (if (iconIsMonochrome) 1f else 0.9f) // full-colour shapes read heavier than glyphs
             val scale = box / maxOf(bmp.width, bmp.height)
             val iw = bmp.width * scale
             val ih = bmp.height * scale

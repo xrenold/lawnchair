@@ -204,13 +204,16 @@ fun HomeScreenPreferences(
         }
         val homeScreenLabelsAdapter = prefs2.showIconLabelsOnHomeScreen.getAdapter()
         PreferenceGroup(heading = stringResource(id = R.string.icons)) {
-            SliderPreference(
-                label = stringResource(id = R.string.icon_sizes),
-                adapter = prefs2.homeIconSizeFactor.getAdapter(),
-                step = 0.1f,
-                valueRange = 0.5F..1.5F,
-                showAsPercentage = true,
-            )
+            // Metro: tiles have their own "Tile icon size" setting above.
+            ExpandAndShrink(visible = !prefs.metroTiles.getAdapter().state.value) {
+                SliderPreference(
+                    label = stringResource(id = R.string.icon_sizes),
+                    adapter = prefs2.homeIconSizeFactor.getAdapter(),
+                    step = 0.1f,
+                    valueRange = 0.5F..1.5F,
+                    showAsPercentage = true,
+                )
+            }
             SwitchPreference(
                 adapter = homeScreenLabelsAdapter,
                 label = stringResource(id = R.string.show_labels),

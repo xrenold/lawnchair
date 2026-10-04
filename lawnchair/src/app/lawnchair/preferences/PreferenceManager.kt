@@ -92,6 +92,8 @@ class PreferenceManager @Inject constructor(
     val metroColorMode = StringPref("pref_metroColorMode", "monet", recreate)
     /** Name of the classic Windows Phone accent used when [metroColorMode] is "classic". */
     val metroClassicAccent = StringPref("pref_metroClassicAccent", "cobalt", recreate)
+    /** Tile icon size in percent of the default (100 = default). */
+    val metroIconSize = IntPref("pref_metroIconSize", 100, recreate)
     /** Live tiles may show message text from notifications. */
     val metroMessagePeek = BoolPref("pref_metroMessagePeek", true)
     /** Serialized Start screen tiles (JSON). Managed by MetroTileStore. */

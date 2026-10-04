@@ -63,6 +63,13 @@ fun MetroPreferenceGroups() {
                     showUnit = "%",
                 )
             }
+            SliderPreference(
+                label = "Tile icon size",
+                adapter = prefs.metroIconSize.getAdapter(),
+                valueRange = 50..150,
+                step = 5,
+                showUnit = "%",
+            )
             val colorMode = prefs.metroColorMode.getAdapter()
             ListPreference(
                 adapter = colorMode,

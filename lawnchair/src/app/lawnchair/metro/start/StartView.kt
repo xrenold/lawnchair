@@ -5,12 +5,8 @@ import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
 import android.content.pm.LauncherApps
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.Rect
-import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -65,9 +61,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private val background = MetroTheme.background(launcher)
     private val windowMode = background == MetroTheme.BG_WINDOW
-    private val holePath = Path()
-    private val blackPaint = Paint().apply { color = Color.BLACK }
-    private val tmpRect = RectF()
 
     private var colorListener: MetroTheme.Listener? = null
     private val storeListener = Runnable { post { reload() } }
@@ -89,13 +82,13 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     init {
         id = View.generateViewId()
-        setWillNotDraw(!windowMode)
         when (background) {
             MetroTheme.BG_BLACK -> setBackgroundColor(Color.BLACK)
             else -> setBackgroundColor(Color.TRANSPARENT)
         }
 
         grid.columns = MetroTheme.columns(launcher)
+        grid.windowMode = windowMode
         grid.isLongClickable = true
         grid.setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -103,7 +96,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             true
         }
         scroller.addView(grid, ViewGroup.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        scroller.setOnScrollChangeListener { _, _, _, _, _ -> if (windowMode) invalidate() }
         addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         setupArrow()
@@ -257,24 +249,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         }
         swipeDetector.onTouchEvent(ev)
         return super.onInterceptTouchEvent(ev)
-    }
-
-    /**
-     * Window mode (Windows Phone 8.1): paint black everywhere except where tiles are, so the
-     * fixed wallpaper only shows through the tiles and they slide across it as you scroll.
-     */
-    override fun onDraw(canvas: Canvas) {
-        if (!windowMode) return
-        holePath.reset()
-        holePath.fillType = Path.FillType.EVEN_ODD
-        holePath.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
-        val dx = scroller.left + grid.left - scroller.scrollX
-        val dy = scroller.top + grid.top - scroller.scrollY
-        grid.forEachTileBounds { l, t, r, b ->
-            tmpRect.set(l + dx, t + dy, r + dx, b + dy)
-            if (tmpRect.bottom > 0 && tmpRect.top < height) holePath.addRect(tmpRect, Path.Direction.CW)
-        }
-        canvas.drawPath(holePath, blackPaint)
     }
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)

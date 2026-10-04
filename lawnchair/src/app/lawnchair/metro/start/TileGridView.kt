@@ -1,6 +1,8 @@
 package app.lawnchair.metro.start
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
@@ -15,6 +17,18 @@ import app.lawnchair.metro.data.TileSize
  * on even columns and rows, keeping medium tiles lined up in 2×2 blocks.
  */
 class TileGridView(context: Context) : ViewGroup(context) {
+
+    /**
+     * Windows Phone 8.1 window mode: everything except the tiles is painted black, so the
+     * fixed wallpaper only shows through the tiles. The mask is drawn here, in the same view
+     * as the tiles, so it scrolls with them in lockstep and is only redrawn on layout.
+     */
+    var windowMode = false
+        set(value) {
+            field = value
+            setWillNotDraw(!value)
+            invalidate()
+        }
 
     var columns = 4
         set(value) {
@@ -46,7 +60,13 @@ class TileGridView(context: Context) : ViewGroup(context) {
             child.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
         }
         val contentHeight = if (rows == 0) 0 else rows * cellSize + (rows - 1) * gutter
-        setMeasuredDimension(width, topPadding + contentHeight + bottomPadding)
+        var height = topPadding + contentHeight + bottomPadding
+        // ScrollView's fillViewport passes the screen height; never be shorter than that, so the
+        // window-mode mask always covers the whole screen.
+        if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) {
+            height = maxOf(height, MeasureSpec.getSize(heightMeasureSpec))
+        }
+        setMeasuredDimension(width, height)
     }
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
@@ -58,6 +78,20 @@ class TileGridView(context: Context) : ViewGroup(context) {
             val top = topPadding + row * (cellSize + gutter)
             child.layout(left, top, left + child.measuredWidth, top + child.measuredHeight)
         }
+        if (windowMode) invalidate() // tile holes moved
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (!windowMode) return
+        val save = canvas.save()
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == View.VISIBLE) {
+                canvas.clipOutRect(c.left, c.top, c.right, c.bottom)
+            }
+        }
+        canvas.drawColor(Color.BLACK)
+        canvas.restoreToCount(save)
     }
 
     /** Places every child; returns the number of rows used. */

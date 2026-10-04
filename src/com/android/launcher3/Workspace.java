@@ -180,6 +180,16 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         super.draw(canvas);
     }
 
+    // Metro: containers with nothing of their own to draw skip draw() and go straight to
+    // dispatchDraw(), so children (dock icons, search bar) must be suppressed here too.
+    @Override
+    protected void dispatchDraw(android.graphics.Canvas canvas) {
+        if (app.lawnchair.metro.MetroMode.isStartEnabled(getContext())) {
+            return;
+        }
+        super.dispatchDraw(canvas);
+    }
+
     /**
      * The value that {@link #mTransitionProgress} must be greater than for
      * {@link #transitionStateShouldAllowDrop()} to return true.

@@ -54,7 +54,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private val scroller = ScrollView(launcher).apply {
         isVerticalScrollBarEnabled = false
-        overScrollMode = OVER_SCROLL_ALWAYS
+        // No stretch overscroll: it distorts the tiles but not the window-mode cut-outs
+        // drawn behind them, so the two would drift apart at the ends of the list.
+        overScrollMode = OVER_SCROLL_NEVER
         isFillViewport = true
         clipToPadding = false
     }

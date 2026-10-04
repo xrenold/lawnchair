@@ -81,6 +81,16 @@ public class Hotseat extends FrameLayout implements Insettable {
         super.draw(canvas);
     }
 
+    // Metro: containers with nothing of their own to draw skip draw() and go straight to
+    // dispatchDraw(), so children (dock icons, search bar) must be suppressed here too.
+    @Override
+    protected void dispatchDraw(android.graphics.Canvas canvas) {
+        if (app.lawnchair.metro.MetroMode.isStartEnabled(getContext())) {
+            return;
+        }
+        super.dispatchDraw(canvas);
+    }
+
     public static final int ALPHA_CHANNEL_TASKBAR_ALIGNMENT = 0;
     public static final int ALPHA_CHANNEL_PREVIEW_RENDERER = 1;
     public static final int ALPHA_CHANNEL_TASKBAR_STASH = 2;

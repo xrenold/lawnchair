@@ -647,7 +647,27 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
 
     // Press feedback: the tile sinks slightly, like the WP tilt effect (full 3D tilt comes later).
     @SuppressLint("ClickableViewAccessibility")
+    /** Where the last touch went down, for picking the tile up under the finger. */
+    var downX = 0f
+        private set
+    var downY = 0f
+        private set
+    var downRawX = 0f
+        private set
+    var downRawY = 0f
+        private set
+
+    /** Set by Start while this tile is being dragged; it receives every touch event. */
+    var dragHandler: ((MotionEvent) -> Boolean)? = null
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            downX = event.x
+            downY = event.y
+            downRawX = event.rawX
+            downRawY = event.rawY
+        }
+        dragHandler?.let { if (it(event)) return true }
         // Media buttons on the back of a music tile take the touch instead of opening the app.
         if (event.actionMasked == MotionEvent.ACTION_DOWN && controlsShown) {
             controlGesture = controlRects.indexOfFirst { it.contains(event.x, event.y) }

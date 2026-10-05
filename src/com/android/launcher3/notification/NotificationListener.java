@@ -271,6 +271,7 @@ public class NotificationListener extends NotificationListenerService {
             mWorkerHandler.obtainMessage(MSG_NOTIFICATION_POSTED, sbn).sendToTarget();
             mNotificationManager.onNotificationPosted(sbn);
             app.lawnchair.metro.live.LiveTileData.onNotificationsChanged(this); // Metro live tiles
+            app.lawnchair.metro.data.MetroUsage.recordNotification(this, sbn); // Metro auto layout
         }
     }
 

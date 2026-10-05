@@ -64,8 +64,40 @@ class TileGridView(context: Context) : ViewGroup(context) {
     private val holePath = Path()
     private val tileRectPath = Path()
 
-    private val tiles: List<TileView>
-        get() = (0 until childCount).mapNotNull { getChildAt(it) as? TileView }
+    /**
+     * Display order of the tiles. Kept separately from child order so a tile can be moved
+     * while it is being dragged (re-adding the dragged view would cancel the touch).
+     */
+    private var order: List<TileView>? = null
+
+    val tiles: List<TileView>
+        get() {
+            val children = (0 until childCount).mapNotNull { getChildAt(it) as? TileView }
+            val o = order ?: return children
+            return o.filter { it.parent === this } + children.filter { it !in o }
+        }
+
+    fun setOrder(views: List<TileView>) {
+        order = views
+    }
+
+    /** The tile being dragged: it follows the finger, so reflow animation skips it. */
+    var draggedView: View? = null
+
+    private var pendingReflow: Map<View, Pair<Int, Int>>? = null
+
+    /** Lays out again and slides tiles from their old spots to their new ones. */
+    fun animateReflow() {
+        pendingReflow = tiles.associateWith { it.left to it.top }
+        requestLayout()
+    }
+
+    /** Height of one row of small tiles, including the gap. */
+    val rowPitch: Int get() = cellSize + gutter
+
+    /** Rows of small tiles that fit in [viewportHeight] below the top inset. */
+    fun rowsInViewport(viewportHeight: Int): Int =
+        ((viewportHeight - topPadding - bottomInset + gutter) / rowPitch.coerceAtLeast(1)).coerceAtLeast(2)
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
@@ -107,6 +139,20 @@ class TileGridView(context: Context) : ViewGroup(context) {
             val top = contentBottom + footerMargin
             it.layout(right - footerSize, top, right, top + footerSize)
         }
+        pendingReflow?.let { before ->
+            pendingReflow = null
+            for ((view, pos) in before) {
+                if (view === draggedView || view.parent !== this) continue
+                val dx = (pos.first - view.left).toFloat()
+                val dy = (pos.second - view.top).toFloat()
+                if (dx == 0f && dy == 0f) continue
+                view.translationX = dx
+                view.translationY = dy
+                view.animate().translationX(0f).translationY(0f).setDuration(200)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+                    .setUpdateListener { invalidate() }.start()
+            }
+        }
         if (windowMode) invalidate() // tile holes moved
     }
 
@@ -135,51 +181,13 @@ class TileGridView(context: Context) : ViewGroup(context) {
     /** Places every tile; returns the number of rows used. */
     private fun pack(tileViews: List<TileView>): Int {
         positions = IntArray(tileViews.size * 2)
-        val occupied = ArrayList<BooleanArray>()
-        fun rowAt(r: Int): BooleanArray {
-            while (occupied.size <= r) occupied += BooleanArray(columns)
-            return occupied[r]
-        }
-        fun fits(col: Int, row: Int, span: Int, rowSpan: Int): Boolean {
-            if (col + span > columns) return false
-            for (r in row until row + rowSpan) {
-                val line = rowAt(r)
-                for (c in col until col + span) if (line[c]) return false
-            }
-            return true
-        }
-
-        var usedRows = 0
+        val packer = app.lawnchair.metro.data.TilePacker(columns)
         tileViews.forEachIndexed { i, view ->
-            val size = view.tile.size
-            val span = size.span.coerceAtMost(columns)
-            val rowSpan = size.rowSpan
-            val aligned = span >= 2
-            val alignRows = aligned && rowSpan >= 2
-            var row = 0
-            placing@ while (true) {
-                if (alignRows && row % 2 != 0) {
-                    row++
-                    continue
-                }
-                var col = 0
-                while (col + span <= columns) {
-                    if (fits(col, row, span, rowSpan)) {
-                        for (r in row until row + rowSpan) {
-                            val line = rowAt(r)
-                            for (c in col until col + span) line[c] = true
-                        }
-                        positions[i * 2] = col
-                        positions[i * 2 + 1] = row
-                        usedRows = maxOf(usedRows, row + rowSpan)
-                        break@placing
-                    }
-                    col += if (aligned) 2 else 1
-                }
-                row++
-            }
+            val (col, row) = packer.place(view.tile.size)
+            positions[i * 2] = col
+            positions[i * 2 + 1] = row
         }
-        return usedRows
+        return packer.usedRows
     }
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)

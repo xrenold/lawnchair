@@ -410,7 +410,10 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         val bounds = Rect()
         view.getGlobalVisibleRect(bounds)
         val options = ActivityOptions.makeClipRevealAnimation(view, 0, 0, view.width, view.height).toBundle()
-        runCatching { launcherApps.startMainActivity(info.componentName, info.user, bounds, options) }
+        runCatching {
+            launcherApps.startMainActivity(info.componentName, info.user, bounds, options)
+            info.componentName?.packageName?.let { app.lawnchair.metro.data.MetroUsage.recordLaunch(launcher, it) }
+        }
             .onFailure { Toast.makeText(launcher, "Couldn't open ${info.title}", Toast.LENGTH_SHORT).show() }
     }
 

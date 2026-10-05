@@ -28,6 +28,8 @@ import app.lawnchair.LawnchairLauncher
 import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.MetroTileStore
 import app.lawnchair.metro.data.TileSize
+import app.lawnchair.metro.auto.AutoLayout
+import app.lawnchair.metro.data.MetroUsage
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.live.LiveTileData
@@ -61,7 +63,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private val prefs = PreferenceManager.getInstance(launcher)
     private var parallax: ParallaxBackgroundView? = null
     private val grid = TileGridView(launcher)
-    private val arrow = TextView(launcher)
+    private val arrow = ArrowButton(launcher, onTap = { openAppList() }, onHoldComplete = { runAutoLayout() })
     /** Solid black behind the status bar: tiles never scroll underneath it. */
     private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
 
@@ -118,8 +120,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         addView(statusStrip, LayoutParams(LayoutParams.MATCH_PARENT, 0, Gravity.TOP))
 
         // The app-list arrow scrolls with the tiles and only shows at the end of Start.
-        setupArrow()
-        grid.footerSize = dp(34f).toInt()
+        grid.footerSize = dp(46f).toInt()
         grid.footer = arrow
 
         // Pulling down past the top opens the notification shade.
@@ -135,21 +136,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         grid.topPadding = insets.top
         grid.bottomInset = insets.bottom
         grid.requestLayout()
-    }
-
-    private fun setupArrow() {
-        arrow.text = "→" // →
-        arrow.gravity = Gravity.CENTER
-        arrow.setTextColor(Color.WHITE)
-        arrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-        arrow.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-        arrow.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setStroke(dp(1.5f).toInt(), Color.WHITE)
-            setColor(Color.TRANSPARENT)
-        }
-        arrow.contentDescription = "All apps"
-        arrow.setOnClickListener { openAppList() }
     }
 
     override fun onAttachedToWindow() {
@@ -171,11 +157,50 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     }
 
     /** Re-reads tiles from storage and rebuilds the grid. */
-    fun reload() {
+    fun reload() = reload(animate = false)
+
+    /**
+     * Rebuilds the grid. With [animate], tiles glide from where they were to their new places
+     * and newly pinned tiles grow in (used after auto layout and undo).
+     */
+    fun reload(animate: Boolean) {
+        if (drag != null) return
+        val oldSpots = if (animate) {
+            grid.tiles.associate { it.tile.component to (it.left to it.top) }
+        } else {
+            emptyMap()
+        }
         tiles = store.load()
         // Remove tiles only; the grid also holds the app-list arrow.
         (0 until grid.childCount).map { grid.getChildAt(it) }.filterIsInstance<TileView>().forEach(grid::removeView)
-        tiles.forEach { grid.addView(createTileView(it), grid.childCount - if (grid.footer != null) 1 else 0) }
+        val views = tiles.map { createTileView(it) }
+        views.forEach { grid.addView(it, grid.childCount - if (grid.footer != null) 1 else 0) }
+        grid.setOrder(views)
+        if (animate) {
+            grid.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    grid.viewTreeObserver.removeOnPreDrawListener(this)
+                    views.forEachIndexed { i, v ->
+                        val old = oldSpots[v.tile.component]
+                        if (old != null) {
+                            v.translationX = (old.first - v.left).toFloat()
+                            v.translationY = (old.second - v.top).toFloat()
+                            v.animate().translationX(0f).translationY(0f).setStartDelay(i * 12L).setDuration(320)
+                                .setInterpolator(android.view.animation.DecelerateInterpolator(1.8f))
+                                .setUpdateListener { grid.invalidate() }.start()
+                        } else {
+                            v.scaleX = 0.6f
+                            v.scaleY = 0.6f
+                            v.alpha = 0f
+                            v.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(120 + i * 12L).setDuration(260)
+                                .setInterpolator(android.view.animation.DecelerateInterpolator(1.8f))
+                                .setUpdateListener { grid.invalidate() }.start()
+                        }
+                    }
+                    return true
+                }
+            })
+        }
         // Live data arrives via the listener once attached (fields below aren't ready during init).
         if (isAttachedToWindow) applyLive(LiveTileData.snapshot)
         invalidate()
@@ -313,9 +338,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private fun createTileView(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
         setOnClickListener { startApp(this) }
+        // Long-press picks the tile up: drag to move it, or let go in place for its menu.
         setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            showTileMenu(this)
+            beginDrag(this)
             true
         }
     }
@@ -327,6 +353,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val options = ActivityOptions.makeClipRevealAnimation(view, 0, 0, view.width, view.height).toBundle()
         runCatching {
             launcherApps.startMainActivity(view.tile.component, Process.myUserHandle(), bounds, options)
+            MetroUsage.recordLaunch(launcher, view.tile.component.packageName)
         }.onFailure {
             Toast.makeText(launcher, "Couldn't open ${view.label}", Toast.LENGTH_SHORT).show()
         }
@@ -346,14 +373,20 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         MetroTheme.CLASSIC_ACCENTS.keys.forEachIndexed { i, name ->
             colors.add(GROUP_COLOR, i + 1, i + 1, name.replaceFirstChar { it.uppercase() })
         }
-        menu.menu.add(Menu.NONE, MENU_UNPIN, 2, "Unpin from Start")
-        menu.menu.add(Menu.NONE, MENU_INFO, 3, "App info")
+        menu.menu.add(Menu.NONE, MENU_LOCK, 2, if (tile.locked) "Unlock tile" else "Lock tile (auto layout keeps it)")
+        menu.menu.add(Menu.NONE, MENU_UNPIN, 3, "Unpin from Start")
+        menu.menu.add(Menu.NONE, MENU_INFO, 4, "App info")
 
         menu.setOnMenuItemClickListener { item ->
             when {
                 item.groupId == GROUP_SIZE -> {
                     tile.size = TileSize.entries[item.itemId]
+                    MetroUsage.recordSize(launcher, tile.component.packageName, tile.size)
                     commit(view)
+                }
+                item.itemId == MENU_LOCK -> {
+                    tile.locked = !tile.locked
+                    store.save(tiles)
                 }
                 item.groupId == GROUP_COLOR -> {
                     tile.color = if (item.itemId == 0) 0 else MetroTheme.CLASSIC_ACCENTS.values.elementAt(item.itemId - 1)
@@ -362,7 +395,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 item.itemId == MENU_UNPIN -> {
                     tiles.removeAll { it.id == tile.id }
                     store.save(tiles)
+                    MetroUsage.recordUnpinned(launcher, tile.component.packageName)
+                    grid.setOrder(grid.tiles.filter { it !== view })
                     grid.removeView(view)
+                    grid.animateReflow()
                     invalidate()
                 }
                 item.itemId == MENU_INFO -> {
@@ -388,6 +424,199 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private fun openAppList() = launcher.openMetroAppList()
 
+    // ---- Drag to rearrange --------------------------------------------------------------
+
+    private class Drag(val view: TileView, val grabX: Float, val grabY: Float, val downRawX: Float, val downRawY: Float) {
+        var moved = false
+        var rawX = downRawX
+        var rawY = downRawY
+        var lastTarget: TileView? = null
+    }
+
+    private var drag: Drag? = null
+    private val touchSlop = android.view.ViewConfiguration.get(launcher).scaledTouchSlop
+    private val gridLoc = IntArray(2)
+    private val scrollerLoc = IntArray(2)
+
+    /** Picks [view] up: it lifts slightly and follows the finger until released. */
+    private fun beginDrag(view: TileView) {
+        if (drag != null) return
+        val d = Drag(view, view.downX, view.downY, view.downRawX, view.downRawY)
+        drag = d
+        view.parent?.requestDisallowInterceptTouchEvent(true)
+        grid.draggedView = view
+        view.translationZ = dp(8f)
+        view.animate().scaleX(1.06f).scaleY(1.06f).alpha(0.92f).setDuration(140)
+            .setUpdateListener { grid.invalidate() }.start()
+        view.dragHandler = { ev -> onDragEvent(d, ev) }
+    }
+
+    private fun onDragEvent(d: Drag, ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                d.rawX = ev.rawX
+                d.rawY = ev.rawY
+                if (!d.moved && Math.hypot((ev.rawX - d.downRawX).toDouble(), (ev.rawY - d.downRawY).toDouble()) > touchSlop * 2) {
+                    d.moved = true
+                }
+                if (d.moved) {
+                    followFinger(d)
+                    reorderUnderFinger(d)
+                    autoScroll(d)
+                }
+            }
+            MotionEvent.ACTION_UP -> endDrag(d, showMenu = !d.moved)
+            MotionEvent.ACTION_CANCEL -> endDrag(d, showMenu = false)
+        }
+        return true
+    }
+
+    /** Finger position in grid coordinates. */
+    private fun fingerInGrid(d: Drag): Pair<Float, Float> {
+        grid.getLocationOnScreen(gridLoc)
+        return (d.rawX - gridLoc[0]) to (d.rawY - gridLoc[1])
+    }
+
+    private fun followFinger(d: Drag) {
+        val (gx, gy) = fingerInGrid(d)
+        d.view.translationX = gx - d.grabX - d.view.left
+        d.view.translationY = gy - d.grabY - d.view.top
+        grid.invalidate()
+    }
+
+    /** Moves the dragged tile in the order to where the finger is; the rest reflow around it. */
+    private fun reorderUnderFinger(d: Drag) {
+        val (gx, gy) = fingerInGrid(d)
+        val others = grid.tiles
+        val target = others.firstOrNull { t ->
+            if (t === d.view) return@firstOrNull false
+            // Only the inner part of a tile counts, so tiles don't swap back and forth on edges.
+            val ix = t.width * 0.18f
+            val iy = t.height * 0.18f
+            gx > t.left + ix && gx < t.right - ix && gy > t.top + iy && gy < t.bottom - iy
+        }
+        val lastBottom = others.filter { it !== d.view }.maxOfOrNull { it.bottom } ?: 0
+        val newOrder: List<TileView>? = when {
+            target != null && target !== d.lastTarget -> {
+                val list = others.toMutableList()
+                list.remove(d.view)
+                val at = list.indexOf(target).let { if (others.indexOf(d.view) < others.indexOf(target)) it + 1 else it }
+                list.add(at.coerceIn(0, list.size), d.view)
+                list
+            }
+            target == null && gy > lastBottom && others.last() !== d.view -> {
+                others.filter { it !== d.view } + d.view
+            }
+            else -> null
+        }
+        d.lastTarget = target
+        if (newOrder != null && newOrder != others) {
+            grid.setOrder(newOrder)
+            tiles = newOrder.map { it.tile }.toMutableList()
+            grid.animateReflow()
+            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            // The dragged tile's slot moved; keep it under the finger after the relayout.
+            grid.post { if (drag === d) followFinger(d) }
+        }
+    }
+
+    private var scrolling = false
+
+    /** Scrolls Start while the dragged tile is held near the top or bottom edge. */
+    private fun autoScroll(d: Drag) {
+        if (scrolling) return
+        scroller.getLocationOnScreen(scrollerLoc)
+        val edge = dp(72f)
+        val top = scrollerLoc[1] + grid.topPadding
+        val bottom = scrollerLoc[1] + scroller.height
+        val speed = when {
+            d.rawY < top + edge -> -dp(14f) * (1f - ((d.rawY - top) / edge).coerceIn(0f, 1f)).coerceAtLeast(0.3f)
+            d.rawY > bottom - edge -> dp(14f) * (1f - ((bottom - d.rawY) / edge).coerceIn(0f, 1f)).coerceAtLeast(0.3f)
+            else -> 0f
+        }
+        if (speed == 0f) return
+        scrolling = true
+        scroller.scrollBy(0, speed.toInt())
+        followFinger(d)
+        reorderUnderFinger(d)
+        scroller.postOnAnimation {
+            scrolling = false
+            if (drag === d) autoScroll(d)
+        }
+    }
+
+    private fun endDrag(d: Drag, showMenu: Boolean) {
+        drag = null
+        val v = d.view
+        v.dragHandler = null
+        grid.draggedView = null
+        v.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).alpha(1f).setDuration(200)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+            .setUpdateListener { grid.invalidate() }
+            .withEndAction { v.translationZ = 0f; grid.invalidate() }
+            .start()
+        if (d.moved) {
+            tiles = grid.tiles.map { it.tile }.toMutableList()
+            store.save(tiles)
+            MetroUsage.recordMoved(launcher, v.tile.component.packageName, regionOf(v))
+        }
+        if (showMenu) showTileMenu(v)
+    }
+
+    /** Which part of Start a tile sits in: top or bottom of the first screen, or below it. */
+    private fun regionOf(v: TileView): MetroUsage.Region {
+        val rows = grid.rowsInViewport(scroller.height)
+        val row = (v.top - grid.topPadding) / grid.rowPitch.coerceAtLeast(1)
+        return when {
+            row >= rows -> MetroUsage.Region.BELOW
+            row >= rows * 0.6 -> MetroUsage.Region.BOTTOM
+            else -> MetroUsage.Region.TOP
+        }
+    }
+
+    // ---- Auto layout --------------------------------------------------------------------
+
+    private val undoBar = UndoBar(launcher)
+
+    /** Rearranges Start from usage (hold the arrow). Undo restores the previous layout. */
+    private fun runAutoLayout() {
+        val before = tiles.map { it.copy() }
+        val columns = grid.columns
+        val rows = grid.rowsInViewport(scroller.height)
+        val ctx = launcher.applicationContext
+        java.util.concurrent.Executors.newSingleThreadExecutor().execute {
+            val result = runCatching { AutoLayout.compute(ctx, before, columns, rows) }.getOrNull()
+            post {
+                if (result == null) {
+                    Toast.makeText(launcher, "Couldn't arrange Start", Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+                scroller.smoothScrollTo(0, 0)
+                store.save(result.tiles)
+                reload(animate = true)
+                val parts = buildList {
+                    if (result.added > 0) add("${result.added} added")
+                    if (result.removed > 0) add("${result.removed} removed")
+                }
+                val msg = if (parts.isEmpty()) "Start arranged" else "Start arranged · " + parts.joinToString(", ")
+                undoBar.show(
+                    this,
+                    message = msg,
+                    hint = if (MetroUsage.hasUsageAccess(launcher)) null else "Allow usage access for better results",
+                    onUndo = {
+                        store.save(before)
+                        reload(animate = true)
+                    },
+                    onHint = {
+                        launcher.startActivity(
+                            Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    },
+                )
+            }
+        }
+    }
+
     // Watched here rather than in onInterceptTouchEvent: once the tiles start scrolling, the
     // scroller blocks interception, which would hide a sideways swipe from us.
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -395,7 +624,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             lastTouchX = ev.x
             lastTouchY = ev.y
         }
-        if (swipeDetector.onTouchEvent(ev)) {
+        if (drag == null && swipeDetector.onTouchEvent(ev)) {
             // Swipe handled: cancel whatever the tiles were doing with this gesture.
             val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
             super.dispatchTouchEvent(cancel)
@@ -421,6 +650,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_COLOR = 101
         private const val MENU_UNPIN = 102
         private const val MENU_INFO = 103
+        private const val MENU_LOCK = 104
         private const val GROUP_SIZE = 1
         private const val GROUP_COLOR = 2
         private const val LIVE_TICK_MS = 2200L

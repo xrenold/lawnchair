@@ -33,6 +33,8 @@ data class MetroTile(
     var size: TileSize = TileSize.MEDIUM,
     /** Per-tile colour override, 0 = follow the theme. */
     var color: Int = 0,
+    /** Locked tiles keep their size and spot when auto layout runs. */
+    var locked: Boolean = false,
 ) {
     /** Stable key for colour picks and icon caching. */
     val key: String get() = component.flattenToShortString()
@@ -42,12 +44,13 @@ data class MetroTile(
         .put("component", component.flattenToString())
         .put("size", size.name)
         .put("color", color)
+        .put("locked", locked)
 
     companion object {
         fun fromJson(o: JSONObject): MetroTile? {
             val cn = ComponentName.unflattenFromString(o.optString("component")) ?: return null
             val size = runCatching { TileSize.valueOf(o.optString("size")) }.getOrDefault(TileSize.MEDIUM)
-            return MetroTile(o.optLong("id"), cn, size, o.optInt("color", 0))
+            return MetroTile(o.optLong("id"), cn, size, o.optInt("color", 0), o.optBoolean("locked", false))
         }
     }
 }
@@ -101,13 +104,20 @@ class MetroTileStore(private val context: Context) {
         if (tiles.any { it.component == component }) return false
         tiles += MetroTile(nextId(tiles), component, TileSize.MEDIUM)
         save(tiles)
+        MetroUsage.recordPinned(context, component.packageName)
         listeners.toList().forEach(Runnable::run)
         return true
     }
 
     fun isPinned(component: ComponentName) = load().any { it.component == component }
 
-    private fun nextId(tiles: List<MetroTile>) = (tiles.maxOfOrNull { it.id } ?: 0L) + 1
+    /** Replaces all tiles (auto layout, undo) and tells Start to rebuild. */
+    fun replaceAll(newTiles: List<MetroTile>) {
+        save(newTiles)
+        listeners.toList().forEach(Runnable::run)
+    }
+
+    fun nextId(tiles: List<MetroTile>) = (tiles.maxOfOrNull { it.id } ?: 0L) + 1
 
     private fun isLaunchable(cn: ComponentName): Boolean {
         val launcherApps = context.getSystemService(LauncherApps::class.java) ?: return true

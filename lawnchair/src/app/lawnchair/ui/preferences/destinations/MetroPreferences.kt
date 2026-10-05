@@ -35,6 +35,17 @@ fun MetroPreferenceGroups() {
             description = "Windows Phone-style tiles instead of the standard home screen",
         )
         ExpandAndShrink(visible = startEnabled.state.value) {
+            val ctx = LocalContext.current
+            ClickablePreference(
+                label = "Auto layout",
+                subtitle = "Hold the arrow at the end of Start to arrange it from your usage. " +
+                    if (app.lawnchair.metro.data.MetroUsage.hasUsageAccess(ctx)) "Usage access is on." else "Tap to allow usage access for better results.",
+                onClick = {
+                    ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                },
+            )
+        }
+        ExpandAndShrink(visible = startEnabled.state.value) {
             SwitchPreference(
                 adapter = prefs.metroShowMoreTiles.getAdapter(),
                 label = "Show more tiles",

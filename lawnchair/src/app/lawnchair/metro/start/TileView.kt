@@ -247,10 +247,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             countPaint.clearShadowLayer()
             return
         }
-        val c = if (l == 1) 0x99000000.toInt() else 0xD9000000.toInt()
-        iconPaint.setShadowLayer(dp(if (l == 1) 5f else 7f), 0f, dp(1f), c)
-        labelPaint.setShadowLayer(dp(if (l == 1) 3f else 4f), 0f, dp(1f), c)
-        countPaint.setShadowLayer(dp(if (l == 1) 3f else 4f), 0f, dp(1f), c)
+        val c = if (l == 1) 0x66000000.toInt() else 0x99000000.toInt()
+        iconPaint.setShadowLayer(dp(if (l == 1) 3f else 5f), 0f, dp(1f), c)
+        labelPaint.setShadowLayer(dp(if (l == 1) 2f else 3f), 0f, dp(1f), c)
+        countPaint.setShadowLayer(dp(if (l == 1) 2f else 3f), 0f, dp(1f), c)
     }
 
     private fun drawFill(canvas: Canvas, readingText: Boolean = false): Int {
@@ -271,13 +271,13 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             // A light overall tint, darker behind text (the label row, or the whole tile when it
             // shows messages), so white text reads on any wallpaper.
             val base = when {
-                readingText -> if (l == 1) 0x59 else 0x80
-                else -> if (l == 1) 0x1A else 0x38
+                readingText -> if (l == 1) 0x40 else 0x66
+                else -> if (l == 1) 0x0D else 0x1F
             }
             fillPaint.color = ColorUtils.setAlphaComponent(Color.BLACK, base)
             canvas.drawRect(0f, 0f, w, h, fillPaint)
             if (!readingText) {
-                val bottom = if (l == 1) 0x66 else 0x99
+                val bottom = if (l == 1) 0x40 else 0x73
                 scrimPaint.shader = LinearGradient(0f, h * 0.55f, 0f, h, 0, ColorUtils.setAlphaComponent(Color.BLACK, bottom), Shader.TileMode.CLAMP)
                 canvas.drawRect(0f, h * 0.55f, w, h, scrimPaint)
                 scrimPaint.shader = null

@@ -187,9 +187,10 @@ object AutoLayout {
         }
 
         // ---- Below the first screen: the rest worth keeping, same rhythm ----
-        val keep = ranked.filter { it.key !in used && (it in forced || it.tap >= 1.0 || it.live >= 1.0) }
+        // Only apps you actually use earn a place below the first screen.
+        val keep = ranked.filter { it.key !in used && (it in forced || it.tap >= 3.0 || it.live >= 2.0) }
             .sortedByDescending { it.score }
-        val maxExtraBlockRows = screenBlockRows * 2 // at most ~2 more screens
+        val maxExtraBlockRows = screenBlockRows // about one more screen
         val restPatterns = restPatterns(blocksPerRow)
         var br = screenBlockRows
         var guard = 0
@@ -198,16 +199,20 @@ object AutoLayout {
             // Medium tiles for apps with live content or heavy use; quads for the rest.
             val mediumWorthy = { a: App -> a.kind != Kind.OTHER || a.live >= 2 || a.tap >= 8 }
             val pattern = when {
-                blocksPerRow == 2 && remaining <= 4 -> listOf(Block.QUAD)
-                blocksPerRow >= 3 && remaining <= blocksPerRow -> List(remaining) { Block.MEDIUM }
+                blocksPerRow == 2 && remaining <= 2 -> List(remaining) { Block.MEDIUM }
+                blocksPerRow >= 3 && remaining <= 2 -> List(remaining) { Block.MEDIUM }
                 else -> restPatterns[guard % restPatterns.size]
             }
             layRow(
                 br,
                 pattern,
                 mPick = { take(keep) { mediumWorthy(it) && okFor(it, TileSize.MEDIUM) } ?: take(keep) { okFor(it, TileSize.MEDIUM) } },
-                sPick = { take(keep) { okFor(it, TileSize.SMALL) } },
-                wPick = { null },
+                // Quads take the least-used apps, so small tiles hold what you open least.
+                sPick = { keep.lastOrNull { it.key !in used && okFor(it, TileSize.SMALL) }?.also { used += it.key } },
+                wPick = {
+                    take(keep) { (it.kind != Kind.OTHER || it.live >= 2) && okFor(it, TileSize.WIDE) }
+                        ?: take(keep) { okFor(it, TileSize.WIDE) }
+                },
             )
             br++
             guard++
@@ -235,16 +240,17 @@ object AutoLayout {
 
     // ---- Patterns ---------------------------------------------------------------------------
 
-    // On 6 columns small tiles get tiny and hard to find, so patterns there are almost all
-    // medium tiles, with an occasional quad of smalls only to keep the rhythm.
+    // Variety is the point: neighbouring rows never repeat, wide tiles turn up all the way down,
+    // and each row has at most one quad of small tiles (on 6 columns small tiles get tiny, so
+    // they appear sparingly there).
 
     private fun glancePatterns(blocks: Int): List<List<Block>> = when (blocks) {
-        2 -> listOf(listOf(Block.WIDE_LEFT), listOf(Block.MEDIUM, Block.MEDIUM), listOf(Block.MEDIUM, Block.QUAD))
+        2 -> listOf(listOf(Block.WIDE_LEFT), listOf(Block.MEDIUM, Block.QUAD), listOf(Block.MEDIUM, Block.MEDIUM))
         3 -> listOf(
             listOf(Block.WIDE_LEFT, Block.MEDIUM),
-            listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM),
+            listOf(Block.MEDIUM, Block.QUAD, Block.MEDIUM),
             listOf(Block.MEDIUM, Block.WIDE_LEFT),
-            listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM),
+            listOf(Block.QUAD, Block.MEDIUM, Block.MEDIUM),
         )
         else -> listOf(List(blocks) { Block.MEDIUM })
     }
@@ -252,15 +258,25 @@ object AutoLayout {
     /** Index 0 is the top row of the easy-reach area, the last index the bottom row. */
     private fun thumbPatterns(blocks: Int): List<List<Block>> = when (blocks) {
         2 -> listOf(listOf(Block.QUAD, Block.MEDIUM), listOf(Block.MEDIUM, Block.QUAD))
-        3 -> listOf(listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM), listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM))
+        3 -> listOf(
+            listOf(Block.MEDIUM, Block.QUAD, Block.MEDIUM),
+            listOf(Block.WIDE_LEFT, Block.MEDIUM),
+        )
         else -> listOf(List(blocks) { Block.MEDIUM })
     }
 
     private fun restPatterns(blocks: Int): List<List<Block>> = when (blocks) {
-        2 -> listOf(listOf(Block.MEDIUM, Block.QUAD), listOf(Block.QUAD, Block.MEDIUM), listOf(Block.QUAD, Block.QUAD))
+        2 -> listOf(
+            listOf(Block.MEDIUM, Block.QUAD),
+            listOf(Block.WIDE_LEFT),
+            listOf(Block.QUAD, Block.MEDIUM),
+            listOf(Block.MEDIUM, Block.MEDIUM),
+        )
         3 -> listOf(
-            listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM),
-            listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM),
+            listOf(Block.MEDIUM, Block.WIDE_LEFT),
+            listOf(Block.QUAD, Block.MEDIUM, Block.MEDIUM),
+            listOf(Block.WIDE_LEFT, Block.MEDIUM),
+            listOf(Block.MEDIUM, Block.MEDIUM, Block.QUAD),
             listOf(Block.MEDIUM, Block.QUAD, Block.MEDIUM),
         )
         else -> listOf(List(blocks) { Block.MEDIUM })

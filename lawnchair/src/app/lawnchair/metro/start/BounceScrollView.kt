@@ -96,6 +96,38 @@ class BounceScrollView(context: Context) : ScrollView(context) {
         return super.dispatchTouchEvent(ev)
     }
 
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+    private var downX = 0f
+    private var downY = 0f
+
+    /**
+     * ScrollView ignores drags when its content fits on screen (nothing to scroll), which would
+     * leave no bounce and no pull-down for notifications on a short Start screen. Claim vertical
+     * drags that push past an edge ourselves.
+     */
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (super.onInterceptTouchEvent(ev)) return true
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x
+                downY = ev.y
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                if (abs(dy) > touchSlop && abs(dy) > abs(dx)) {
+                    val pastTop = dy > 0 && !canScrollVertically(-1)
+                    val pastBottom = dy < 0 && !canScrollVertically(1)
+                    if (pastTop || pastBottom) {
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_MOVE) {

@@ -39,6 +39,7 @@ import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.TileSize
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.live.LiveItem
+import app.lawnchair.metro.theme.MetroIcons
 import app.lawnchair.metro.theme.MetroTheme
 import app.lawnchair.preferences.PreferenceManager
 import java.util.concurrent.Executors
@@ -65,7 +66,6 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     private val iconRect = RectF()
     var label: CharSequence = ""
         private set
-    private var activityInfo: LauncherActivityInfo? = null
 
     /** Set by StartView in window mode: the tile is only a light tint over the wallpaper. */
     var windowMode = false
@@ -164,31 +164,17 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
 
     private fun loadIconAsync() {
         val target = tile.component
-        ICON_EXECUTOR.execute {
-            val launcherApps = context.getSystemService(LauncherApps::class.java)
-            val info = runCatching {
-                launcherApps?.getActivityList(target.packageName, Process.myUserHandle())
-                    ?.firstOrNull { it.componentName == target }
-                    ?: launcherApps?.getActivityList(target.packageName, Process.myUserHandle())?.firstOrNull()
-            }.getOrNull()
-            val density = resources.displayMetrics.densityDpi
-            val full = runCatching { info?.getIcon(density) }.getOrNull()
-            var mono: Drawable? = null
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && full is AdaptiveIconDrawable) {
-                mono = full.monochrome
-            }
-            val text = runCatching { info?.label }.getOrNull() ?: target.packageName
-            val trimmed = runCatching { (mono ?: full)?.let(::renderTrimmed) }.getOrNull()
-            MAIN.post {
-                if (tile.component != target) return@post
-                activityInfo = info
-                iconIsMonochrome = mono != null
-                icon = trimmed
-                label = text
-                contentDescription = text
+        val apply = { loaded: MetroIcons.Icon ->
+            if (tile.component == target) {
+                iconIsMonochrome = loaded.monochrome
+                icon = loaded.bitmap
+                label = loaded.label
+                contentDescription = loaded.label
+                backLayouts = null
                 invalidate()
             }
         }
+        MetroIcons.get(context, target) { apply(it) }?.let { apply(it) }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -218,11 +204,6 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         val onColor = drawFill(canvas)
 
         labelPaint.textSize = spK(13f, 11.5f)
-
-        if (tile.size.isStrip) {
-            drawStripFront(canvas, onColor, count)
-            return
-        }
 
         // Icon: every glyph gets the same box for a given tile size, measured from its visible
         // artwork, so apps with padded or oversized icons line up with the rest.
@@ -271,39 +252,6 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         }
     }
 
-    /** 6×1 front: icon on the left, name beside it, count on the right, all on one line. */
-    private fun drawStripFront(canvas: Canvas, onColor: Int, count: Int) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val pad = dp(12f) * k
-        var x = pad
-        icon?.let { bmp ->
-            val userScale = PreferenceManager.getInstance(context).metroIconSize.get() / 100f
-            val box = h * 0.46f * userScale * (if (iconIsMonochrome) 1f else 0.9f)
-            val scale = box / maxOf(bmp.width, bmp.height)
-            val iw = bmp.width * scale
-            val ih = bmp.height * scale
-            iconRect.set(x, (h - ih) / 2f, x + iw, (h + ih) / 2f)
-            iconPaint.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
-            canvas.drawBitmap(bmp, null, iconRect, iconPaint)
-            x += box + dp(12f) * k
-        }
-        var right = w - pad
-        if (count > 0) {
-            countPaint.textSize = spK(22f, 16f)
-            countPaint.color = onColor
-            val t = countLabel(count)
-            val fm = countPaint.fontMetrics
-            right -= countPaint.measureText(t)
-            canvas.drawText(t, right, h / 2f - (fm.ascent + fm.descent) / 2f, countPaint)
-            right -= dp(10f)
-        }
-        labelPaint.color = onColor
-        val text = TextUtils.ellipsize(label, labelPaint, right - x, TextUtils.TruncateAt.END)
-        val fm = labelPaint.fontMetrics
-        canvas.drawText(text, 0, text.length, x, h / 2f - (fm.ascent + fm.descent) / 2f, labelPaint)
-    }
-
     /**
      * Back face.
      *  - Music: album art fills the tile, track and artist over a dark fade.
@@ -331,11 +279,6 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         headPaint.color = onColor
         bodyPaint.color = onColor
         labelPaint.textSize = spK(13f, 11f)
-
-        if (tile.size.isStrip) {
-            drawStripBack(canvas, info, onColor, pad)
-            return
-        }
 
         // Footer: app icon + name, count on the right.
         val footerIcon = dp(16f) * k
@@ -435,39 +378,6 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         }
     }
 
-    /** 6×1 back: picture, then sender and message on two short lines, app icon and count right. */
-    private fun drawStripBack(canvas: Canvas, info: LiveInfo, onColor: Int, pad: Float) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        var x = pad
-        val pic = info.items.firstOrNull()?.image ?: info.image
-        if (pic != null) {
-            val a = h - pad * 2
-            drawCover(canvas, pic, x, pad, x + a, pad + a, paint = if (info.isMusic) artPaint else avatarPaint)
-            x += a + dp(10f) * k
-        }
-        // Right: app icon with the count under it.
-        val iconSize = dp(16f) * k
-        var right = w - pad - iconSize
-        drawAppIcon(canvas, right, if (info.count > 0) h / 2f - iconSize else (h - iconSize) / 2f, iconSize, onColor)
-        if (info.count > 0 && !info.isMusic) {
-            countPaint.textSize = spK(12f, 10f)
-            countPaint.color = onColor
-            val t = countLabel(info.count)
-            canvas.drawText(t, right + (iconSize - countPaint.measureText(t)) / 2f, h / 2f + dp(2f) - countPaint.ascent(), countPaint)
-        }
-        right -= dp(10f) * k
-        val rows = ensureBackLayouts(info, (right - x).toInt())
-        val row = rows.firstOrNull() ?: return
-        val textH = (row.title?.height ?: 0) + (row.body?.height ?: 0)
-        canvas.save()
-        canvas.translate(x, (h - textH) / 2f)
-        row.title?.draw(canvas)
-        canvas.translate(0f, (row.title?.height ?: 0).toFloat())
-        row.body?.draw(canvas)
-        canvas.restore()
-    }
-
     private fun drawAppIcon(canvas: Canvas, left: Float, top: Float, size: Float, onColor: Int) {
         val bmp = icon ?: return
         val s = size / maxOf(bmp.width, bmp.height)
@@ -503,22 +413,8 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
             bodyPaint.color = dim
             listOf(
                 BackRow(
-                    info.title?.let { layout(it, headPaint, wInt, if (tile.size.isStrip) 1 else 2) },
+                    info.title?.let { layout(it, headPaint, wInt, 2) },
                     info.text?.let { layout(it, bodyPaint, wInt, 1) },
-                    null,
-                ),
-            )
-        } else if (tile.size.isStrip) {
-            val item = info.items.firstOrNull()
-            headPaint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            headPaint.textSize = spK(14f, 12f)
-            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-            bodyPaint.textSize = spK(13f, 11f)
-            bodyPaint.color = dim
-            listOf(
-                BackRow(
-                    (item?.title ?: info.title)?.let { layout(it, headPaint, wInt, 1) },
-                    (item?.text ?: info.text)?.let { layout(it, bodyPaint, wInt, 1) },
                     null,
                 ),
             )
@@ -652,40 +548,4 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
 
-    companion object {
-        private const val RENDER_SIZE = 256
-
-        /**
-         * Draws [d] into a bitmap and crops away transparent padding, leaving only the visible
-         * artwork. Icons are then scaled by that artwork, not by their padded canvas.
-         */
-        private fun renderTrimmed(d: Drawable): Bitmap {
-            val full = Bitmap.createBitmap(RENDER_SIZE, RENDER_SIZE, Bitmap.Config.ARGB_8888)
-            val c = Canvas(full)
-            d.setBounds(0, 0, RENDER_SIZE, RENDER_SIZE)
-            d.draw(c)
-            val px = IntArray(RENDER_SIZE * RENDER_SIZE)
-            full.getPixels(px, 0, RENDER_SIZE, 0, 0, RENDER_SIZE, RENDER_SIZE)
-            var minX = RENDER_SIZE
-            var minY = RENDER_SIZE
-            var maxX = -1
-            var maxY = -1
-            for (y in 0 until RENDER_SIZE) {
-                val row = y * RENDER_SIZE
-                for (x in 0 until RENDER_SIZE) {
-                    if ((px[row + x] ushr 24) > 24) {
-                        if (x < minX) minX = x
-                        if (x > maxX) maxX = x
-                        if (y < minY) minY = y
-                        if (y > maxY) maxY = y
-                    }
-                }
-            }
-            if (maxX < minX || maxY < minY) return full
-            return Bitmap.createBitmap(full, minX, minY, maxX - minX + 1, maxY - minY + 1)
-        }
-
-        private val ICON_EXECUTOR = Executors.newSingleThreadExecutor()
-        private val MAIN = Handler(Looper.getMainLooper())
-    }
 }

@@ -12,22 +12,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Windows Phone tile sizes, measured in small-tile cells. */
-enum class TileSize(val span: Int, val rowSpan: Int, val label: String, val sixColumnsOnly: Boolean = false) {
+enum class TileSize(val span: Int, val rowSpan: Int, val label: String) {
     SMALL(1, 1, "Small"),
     MEDIUM(2, 2, "Medium"),
     WIDE(4, 2, "Wide"),
     LARGE(4, 4, "Large"),
-    /** Full-width strip, one small tile high (6-column Start). */
-    BANNER(6, 1, "Banner (6×1)", sixColumnsOnly = true),
-    /** Full-width, two small tiles high (6-column Start). */
-    EXTRA_WIDE(6, 2, "Extra wide (6×2)", sixColumnsOnly = true),
     ;
 
-    /** One cell tall and several wide: content is laid out in a single row. */
-    val isStrip: Boolean get() = rowSpan == 1 && span > 1
-
     /** Sizes that list several messages when live. */
-    val isList: Boolean get() = this == WIDE || this == LARGE || this == EXTRA_WIDE
+    val isList: Boolean get() = this == WIDE || this == LARGE
 }
 
 /**

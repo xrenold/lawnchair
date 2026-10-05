@@ -39,6 +39,7 @@ import app.lawnchair.data.wallpaper.service.WallpaperService
 import app.lawnchair.gestures.GestureController
 import app.lawnchair.gestures.VerticalSwipeTouchController
 import app.lawnchair.metro.MetroMode
+import app.lawnchair.metro.applist.AppListView
 import app.lawnchair.metro.start.MetroTouchGate
 import app.lawnchair.metro.start.PinToStartShortcut
 import app.lawnchair.metro.start.StartView
@@ -104,6 +105,14 @@ class LawnchairLauncher : QuickstepLauncher() {
     /** Metro Start screen, present when Metro is enabled. */
     var startView: StartView? = null
         private set
+
+    /** Metro app list, opened from Start. */
+    var metroAppList: AppListView? = null
+        private set
+
+    fun openMetroAppList() {
+        metroAppList?.open() ?: stateManager.goToState(LauncherState.ALL_APPS)
+    }
 
     private val defaultOverlay by unsafeLazy { OverlayCallbackImpl(this) }
     private val prefs by unsafeLazy { PreferenceManager.getInstance(this) }
@@ -277,8 +286,13 @@ class LawnchairLauncher : QuickstepLauncher() {
         val alreadyHome = isInState(LauncherState.NORMAL) && hasWindowFocus()
         super.onNewIntent(intent)
         // Metro: pressing Home while on Start scrolls back to the top, like the WP Start button.
-        if (alreadyHome && intent?.hasCategory(Intent.CATEGORY_HOME) == true) {
-            startView?.scrollToTop()
+        if (intent?.hasCategory(Intent.CATEGORY_HOME) == true) {
+            if (metroAppList?.isOpen == true) {
+                // Home from the app list returns to Start (animated if we're on screen).
+                metroAppList?.close(animate = alreadyHome)
+            } else if (alreadyHome) {
+                startView?.scrollToTop()
+            }
         }
     }
 
@@ -297,6 +311,18 @@ class LawnchairLauncher : QuickstepLauncher() {
             ),
         )
         startView = view
+
+        val appList = AppListView(this)
+        appList.startView = view
+        layer.addView(
+            appList,
+            index + 1,
+            com.android.launcher3.views.BaseDragLayer.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        metroAppList = appList
     }
 
     override fun collectStateHandlers(out: MutableList<StateHandler<LauncherState>>) {
@@ -331,6 +357,7 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun onStateBack() {
+        if (metroAppList?.onBack() == true) return
         val searchInput = mAppsView?.searchUiManager?.editText
         val isSearching = mAppsView?.isSearching == true || searchInput?.hasFocus() == true
         if (isSearching) {

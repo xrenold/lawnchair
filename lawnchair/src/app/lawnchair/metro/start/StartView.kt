@@ -124,7 +124,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     /** Status bar and gesture bar insets, delivered by Launcher's DragLayer. */
     override fun setInsets(insets: Rect) {
-        grid.topPadding = insets.top + dp(24f).toInt()
+        grid.topPadding = insets.top
         grid.bottomInset = insets.bottom
         grid.requestLayout()
     }
@@ -250,7 +250,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val menu = PopupMenu(launcher, view, Gravity.END)
         val sizes = menu.menu.addSubMenu(Menu.NONE, MENU_RESIZE, 0, "Resize")
         TileSize.entries.forEachIndexed { i, size ->
-            if (size.sixColumnsOnly && grid.columns < 6 && size != tile.size) return@forEachIndexed
             sizes.add(GROUP_SIZE, i, i, size.label).setCheckable(true).isChecked = size == tile.size
         }
         sizes.setGroupCheckable(GROUP_SIZE, true, true)
@@ -300,9 +299,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         invalidate()
     }
 
-    private fun openAppList() {
-        launcher.stateManager.goToState(LauncherState.ALL_APPS)
-    }
+    private fun openAppList() = launcher.openMetroAppList()
 
     // Watched here rather than in onInterceptTouchEvent: once the tiles start scrolling, the
     // scroller blocks interception, which would hide a sideways swipe from us.

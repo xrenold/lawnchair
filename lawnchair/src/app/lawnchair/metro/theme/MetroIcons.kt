@@ -171,7 +171,57 @@ object MetroIcons {
     @JvmStatic
     fun clear() = cache.evictAll()
 
+    // ---- Saved icons ---------------------------------------------------------------------------
+    // Rendered icons and their colour analysis are saved, so after a launcher restart Start and
+    // the app list appear fully drawn almost at once. The key changes when the app updates, the
+    // icon pack or language changes, or (for packs that follow Material You) the palette changes.
+
+    private fun diskKey(context: Context, target: ComponentName, user: UserHandle): String {
+        val stamp = runCatching { context.packageManager.getPackageInfo(target.packageName, 0).lastUpdateTime }.getOrDefault(0L)
+        val palette = if (packKey.isNotEmpty() && Build.VERSION.SDK_INT >= 31) {
+            context.getColor(android.R.color.system_accent1_500)
+        } else {
+            0
+        }
+        val raw = "${target.flattenToString()}#${user.hashCode()}#$packKey#$stamp#$palette#" +
+            "${java.util.Locale.getDefault().toLanguageTag()}#${context.resources.displayMetrics.densityDpi}"
+        return Integer.toHexString(raw.hashCode()) + "_" + Integer.toHexString(raw.reversed().hashCode())
+    }
+
+    private fun diskDir(context: Context) = java.io.File(context.cacheDir, "metro_icons").apply { mkdirs() }
+
+    private fun readDisk(context: Context, key: String): Icon? = runCatching {
+        val dir = diskDir(context)
+        val meta = java.io.File(dir, "$key.meta").takeIf { it.exists() }?.readText() ?: return null
+        val p = meta.split('\u0001')
+        if (p.size < 8) return null
+        val png = java.io.File(dir, "$key.png")
+        val bmp = if (png.exists()) android.graphics.BitmapFactory.decodeFile(png.path) else null
+        Icon(bmp, p[0] == "1", p[1], p[2].toInt(), p[3].toInt(), p[4].toFloat(), p[5] == "1", p[6].toInt())
+    }.getOrNull()
+
+    private fun writeDisk(context: Context, key: String, icon: Icon) {
+        runCatching {
+            val dir = diskDir(context)
+            icon.bitmap?.let { b -> java.io.File(dir, "$key.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+            val meta = listOf(
+                if (icon.monochrome) "1" else "0", icon.label.toString().replace('\u0001', ' '), icon.brandColor, icon.brandTile,
+                icon.brandStrength, if (icon.fromPack) "1" else "0", icon.packColor, "v1",
+            ).joinToString("\u0001")
+            java.io.File(dir, "$key.meta").writeText(meta)
+            // Keep the folder small: drop the oldest half when it grows large.
+            val files = dir.listFiles().orEmpty()
+            if (files.size > 1600) files.sortedBy { it.lastModified() }.take(files.size / 2).forEach { it.delete() }
+        }
+    }
+
     private fun load(context: Context, target: ComponentName, user: UserHandle): Icon {
+        val key = diskKey(context, target, user)
+        readDisk(context, key)?.let { return it }
+        return loadFresh(context, target, user).also { writeDisk(context, key, it) }
+    }
+
+    private fun loadFresh(context: Context, target: ComponentName, user: UserHandle): Icon {
         val launcherApps = context.getSystemService(LauncherApps::class.java)
         val info = runCatching {
             val list = launcherApps?.getActivityList(target.packageName, user)

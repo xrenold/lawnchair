@@ -336,8 +336,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      */
     private val liveTicker = object : Runnable {
         override fun run() {
-            postDelayed(this, LIVE_TICK_MS + random.nextInt(600))
-            if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() || panelOpen || holdShown) return
+            // Sleeps (checks every few seconds) while Start is hidden or nothing on it is live.
+            val idle = !prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() ||
+                (0 until grid.childCount).none { (grid.getChildAt(it) as? TileView)?.let { t -> t.hasBackFace || t.showingBack } == true }
+            postDelayed(this, if (idle) 5000L else LIVE_TICK_MS + random.nextInt(600))
+            if (idle || panelOpen || holdShown) return
             val now = System.currentTimeMillis()
             val onScreen = (0 until grid.childCount)
                 .mapNotNull { grid.getChildAt(it) as? TileView }
@@ -398,7 +401,15 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             dimView.alpha = 0f
             return
         }
-        BackgroundDim.measure(launcher, parallax?.image) { lum ->
+        val bg = parallax
+        if (bg?.image != null) {
+            // Your own photo: the dim is painted into it once (no extra layer per frame).
+            if (bg.dimBaked) return
+            dimView.alpha = 0f
+            BackgroundDim.measure(launcher, bg.image) { lum -> bg.bakeDim(BackgroundDim.dimFor(lum, level)) }
+            return
+        }
+        BackgroundDim.measure(launcher, null) { lum ->
             dimView.animate().alpha(BackgroundDim.dimFor(lum, level)).setDuration(250).start()
         }
     }

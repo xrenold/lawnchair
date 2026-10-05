@@ -44,7 +44,8 @@ class ParallaxBackgroundView(context: Context) : View(context) {
         var sample = 1
         val targetH = (dm.heightPixels * (1 + travel)).toInt()
         while (opts.outWidth / (sample * 2) >= dm.widthPixels && opts.outHeight / (sample * 2) >= targetH) sample *= 2
-        bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+        bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample; inMutable = true })
+        dimBaked = false
         invalidate()
     }
 
@@ -52,6 +53,24 @@ class ParallaxBackgroundView(context: Context) : View(context) {
 
     /** The loaded photo, for measuring its brightness. */
     val image: Bitmap? get() = bitmap
+
+    /** True once the legibility dim has been painted into the photo itself. */
+    var dimBaked = false
+        private set
+
+    /**
+     * Paints the dim straight into the photo, once, instead of blending a separate full-screen
+     * layer on every frame while Start scrolls.
+     */
+    fun bakeDim(alpha: Float) {
+        val bmp = bitmap ?: return
+        if (dimBaked) return
+        dimBaked = true
+        if (alpha <= 0f) return
+        val target = if (bmp.isMutable) bmp else bmp.copy(Bitmap.Config.ARGB_8888, true).also { bitmap = it }
+        Canvas(target).drawColor(android.graphics.Color.argb((alpha * 255).toInt(), 0, 0, 0))
+        invalidate()
+    }
 
     /** 0 at the top of Start, 1 at the bottom. Only moves the view: no redraw needed. */
     fun setScrollFraction(fraction: Float) {

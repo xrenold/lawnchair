@@ -117,6 +117,11 @@ object LiveTileData {
         val listener = NotificationListener.getInstanceIfConnected() ?: return emptyMap()
         val active: Array<StatusBarNotification> = runCatching { listener.activeNotifications }.getOrNull() ?: emptyArray()
 
+        // Drop cached content for notifications that are gone.
+        val activeKeys = active.mapTo(HashSet()) { it.key }
+        itemCache.keys.retainAll(activeKeys)
+        iconCache.keys.retainAll(activeKeys)
+
         val byPackage = HashMap<String, LiveInfo>()
         active
             .filter { isUserFacing(it) }
@@ -124,7 +129,7 @@ object LiveTileData {
             .forEach { (pkg, list) ->
                 val count = list.sumOf { sbn -> sbn.notification.number.takeIf { it > 0 } ?: 1 }
                 val items = list
-                    .flatMap { sbn -> itemsOf(context, sbn) }
+                    .flatMap { sbn -> cachedItems(context, sbn) }
                     .sortedByDescending { it.time }
                     .take(MAX_ITEMS)
                 val first = items.firstOrNull()
@@ -152,7 +157,7 @@ object LiveTileData {
                     else -> -1f
                 }
                 val prev = byPackage[sbn.packageName]
-                val image = runCatching { sbn.notification.getLargeIcon()?.let { loadIcon(context, it) } }.getOrNull()
+                val image = cachedIcon(context, sbn)
                 byPackage[sbn.packageName] = (prev ?: LiveInfo(sbn.packageName)).copy(
                     title = e.getCharSequence(Notification.EXTRA_TITLE),
                     text = e.getCharSequence(Notification.EXTRA_TEXT) ?: e.getCharSequence(Notification.EXTRA_SUB_TEXT),
@@ -179,8 +184,12 @@ object LiveTileData {
                 ?: meta.getText(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             val pkg = controller.packageName
             // Keep the app's unread count; the music itself replaces the message content.
+            val scaled = art?.let { a ->
+                val k = "$pkg|$title|${a.generationId}"
+                artCache?.takeIf { it.first == k }?.second ?: scaleDown(a).also { artCache = k to it }
+            }
             byPackage[pkg] = LiveInfo(
-                pkg, byPackage[pkg]?.count ?: 0, title, artist, art?.let(::scaleDown),
+                pkg, byPackage[pkg]?.count ?: 0, title, artist, scaled,
                 isMusic = true,
                 ongoing = true,
                 controller = controller,
@@ -191,6 +200,24 @@ object LiveTileData {
     }
 
     private const val MAX_ITEMS = 6
+
+    // Built content per notification (key → postTime and items), so a change to one
+    // notification doesn't re-decode every sender's picture. Only touched on the worker thread.
+    private val itemCache = HashMap<String, Pair<Long, List<LiveItem>>>()
+    private val iconCache = HashMap<String, Pair<Long, Bitmap?>>()
+    private var artCache: Pair<String, Bitmap>? = null
+
+    private fun cachedItems(context: Context, sbn: StatusBarNotification): List<LiveItem> {
+        itemCache[sbn.key]?.let { (t, items) -> if (t == sbn.postTime) return items }
+        return itemsOf(context, sbn).also { itemCache[sbn.key] = sbn.postTime to it }
+    }
+
+    private fun cachedIcon(context: Context, sbn: StatusBarNotification): Bitmap? {
+        iconCache[sbn.key]?.let { (t, bmp) -> if (t == sbn.postTime) return bmp }
+        val bmp = runCatching { sbn.notification.getLargeIcon()?.let { loadIcon(context, it) } }.getOrNull()
+        iconCache[sbn.key] = sbn.postTime to bmp
+        return bmp
+    }
 
     /**
      * The app's notifications for the Start notification panel, newest first. Calls are left
@@ -207,8 +234,9 @@ object LiveTileData {
     /** True when the app has notifications the panel can show. */
     @JvmStatic
     fun hasPanelContent(pkg: String): Boolean {
+        // From the snapshot already in memory: no call to Android on every touch.
         val info = snapshot[pkg] ?: return false
-        return info.count > 0 && !info.isMusic && notificationsFor(pkg).isNotEmpty()
+        return info.count > 0 && !info.isMusic && info.items.isNotEmpty()
     }
 
     /** Dismisses a notification everywhere, including the notification shade. */

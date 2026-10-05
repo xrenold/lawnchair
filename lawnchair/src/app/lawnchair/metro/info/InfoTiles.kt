@@ -26,6 +26,7 @@ import java.net.URL
 import java.util.Calendar
 import java.util.TimeZone
 import java.util.concurrent.Executors
+import kotlin.math.abs
 
 /** Tiles that show information from the phone rather than notifications. */
 enum class InfoKind { CALENDAR, WEATHER, CLOCK, PHOTOS }
@@ -307,10 +308,17 @@ object InfoTiles {
         }
     }
 
-    /** Camera photos on the phone from the last 30 days, newest first (no screenshots). */
+    /** Photos from [photos] that suit wide tiles (landscape-shaped). */
+    @Volatile var landscapePhotos: Set<Uri> = emptySet()
+        private set
+
+    /**
+     * Camera photos on the phone from the last 30 days that pass the quality filter (see
+     * PhotoQuality): no blurry, dark, blown-out, document or duplicate shots. The best 40 by
+     * score are kept, shown newest first.
+     */
     private fun queryPhotos(context: Context): List<Uri> {
         val since = System.currentTimeMillis() - 30 * DAY
-        val out = ArrayList<Uri>()
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         @Suppress("DEPRECATION")
         val (selection, folder) = if (Build.VERSION.SDK_INT >= 29) {
@@ -318,13 +326,34 @@ object InfoTiles {
         } else {
             "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.DATA} LIKE ?" to "%/DCIM/Camera/%"
         }
+        class Candidate(val uri: Uri, val taken: Long, val q: PhotoQuality.Result)
+        val kept = ArrayList<Candidate>()
         context.contentResolver.query(
-            collection, arrayOf(MediaStore.Images.Media._ID), selection, arrayOf(since.toString(), folder),
-            "${MediaStore.Images.Media.DATE_TAKEN} DESC",
+            collection, arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_TAKEN), selection,
+            arrayOf(since.toString(), folder), "${MediaStore.Images.Media.DATE_TAKEN} DESC",
         )?.use { c ->
-            while (c.moveToNext() && out.size < 60) out += ContentUris.withAppendedId(collection, c.getLong(0))
+            var looked = 0
+            while (c.moveToNext() && looked < 200) {
+                looked++
+                val id = c.getLong(0)
+                val uri = ContentUris.withAppendedId(collection, id)
+                val q = PhotoQuality.evaluate(context, id, uri) ?: continue
+                val cand = Candidate(uri, c.getLong(1), q)
+                // A burst of near-identical shots keeps only its best.
+                val twin = kept.lastOrNull { abs(it.taken - cand.taken) < 15_000 && PhotoQuality.similar(it.q.hash, cand.q.hash) }
+                if (twin != null) {
+                    if (cand.q.score > twin.q.score) {
+                        kept.remove(twin)
+                        kept += cand
+                    }
+                } else {
+                    kept += cand
+                }
+            }
         }
-        return out
+        val best = kept.sortedByDescending { it.q.score }.take(40).sortedByDescending { it.taken }
+        landscapePhotos = best.filter { it.q.landscape }.map { it.uri }.toSet()
+        return best.map { it.uri }
     }
 
     // ---- Weather -----------------------------------------------------------------------------

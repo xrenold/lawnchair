@@ -88,6 +88,7 @@ class TileGridView(context: Context) : ViewGroup(context) {
 
     fun setOrder(views: List<View>) {
         order = views
+        staticValid = false
     }
 
     /** The tile being dragged: it follows the finger, so reflow animation skips it. */
@@ -124,16 +125,19 @@ class TileGridView(context: Context) : ViewGroup(context) {
         return if (i < 0 || i * 2 + 1 >= positions.size) -1 else positions[i * 2 + 1]
     }
 
+    /** Space above the first row: half a group gap. */
+    val topSpace: Int get() = groupGap / 2
+
     /** Rows before which a group gap sits. */
     private var gapRows = IntArray(0)
 
     /** Rows of small tiles that fit in [viewportHeight] below the top inset (top space and one gap allowed). */
     fun rowsInViewport(viewportHeight: Int): Int =
-        ((viewportHeight - topPadding - bottomInset - groupGap * 2 + gutter) / rowPitch.coerceAtLeast(1)).coerceAtLeast(2)
+        ((viewportHeight - topPadding - bottomInset - topSpace - groupGap + gutter) / rowPitch.coerceAtLeast(1)).coerceAtLeast(2)
 
     /** Top of cell row [row], counting the group gaps above it. */
     private fun rowTop(row: Int): Int =
-        topPadding + groupGap + row * (cellSize + gutter) + groupGap * gapRows.count { it <= row }
+        topPadding + topSpace + row * (cellSize + gutter) + groupGap * gapRows.count { it <= row }
 
     /** Picks group-gap rows from where the tiles sit (see the class comment). */
     private fun computeGaps(tileViews: List<View>, usedRows: Int) {
@@ -187,7 +191,7 @@ class TileGridView(context: Context) : ViewGroup(context) {
         computeGaps(tileViews, rows)
         val contentHeight = if (rows == 0) 0 else rows * cellSize + (rows - 1) * gutter + groupGap * gapRows.size
         // Start opens with the same pause that separates its groups.
-        contentBottom = topPadding + groupGap + contentHeight
+        contentBottom = topPadding + topSpace + contentHeight
         val footerSpace = if (footer != null) footerMargin * 2 + footerSize else dp(24f).toInt()
         var height = contentBottom + footerSpace + bottomInset
         // ScrollView's fillViewport passes the screen height; never be shorter than that, so the
@@ -223,36 +227,56 @@ class TileGridView(context: Context) : ViewGroup(context) {
                     .setUpdateListener { invalidate() }.start()
             }
         }
+        staticValid = false
         if (windowMode) invalidate() // tile holes moved
     }
 
+    /**
+     * Holes for tiles at rest are kept in [staticHoles] and reused frame after frame; only tiles
+     * that are moving (flipping, pressed, wiggling, dragged) are re-added each frame. The cache
+     * is rebuilt when the layout changes or a different set of tiles is moving.
+     */
+    private val staticHoles = Path()
+    private var staticValid = false
+    private val staticMovers = HashSet<View>()
+    private val movers = HashSet<View>()
+
+    private fun isMoving(c: View) = c.holder().lifted || !c.matrix.isIdentity
+
     override fun onDraw(canvas: Canvas) {
         if (!windowMode) return
+        val all = tiles
+        movers.clear()
+        for (c in all) if (c.visibility == View.VISIBLE && isMoving(c)) movers += c
+        if (!staticValid || movers != staticMovers) {
+            staticHoles.rewind()
+            for (c in all) {
+                if (c.visibility != View.VISIBLE || c in movers) continue
+                staticHoles.addRect(c.left.toFloat(), c.top.toFloat(), c.right.toFloat(), c.bottom.toFloat(), Path.Direction.CW)
+            }
+            staticMovers.clear()
+            staticMovers += movers
+            staticValid = true
+        }
         holePath.rewind()
-        for (c in tiles) {
-            if (c.visibility != View.VISIBLE) continue
+        for (c in movers) {
             val h = c.holder()
+            tileRectPath.rewind()
             if (h.lifted) {
                 // Dragged tile: its window sits inside its black frame, on top of the others.
                 val b = h.liftBorder
-                tileRectPath.rewind()
                 tileRectPath.addRect(b, b, c.width - b, c.height - b, Path.Direction.CW)
-                tileRectPath.transform(c.matrix)
-                tileRectPath.offset(c.left.toFloat(), c.top.toFloat())
-                holePath.addPath(tileRectPath)
-            } else if (c.matrix.isIdentity) {
-                holePath.addRect(c.left.toFloat(), c.top.toFloat(), c.right.toFloat(), c.bottom.toFloat(), Path.Direction.CW)
             } else {
-                // Flipping or pressed: cut the hole in the tile's projected (3D-rotated) shape.
-                tileRectPath.rewind()
+                // Flipping, pressed or wiggling: the hole takes the tile's projected shape.
                 tileRectPath.addRect(0f, 0f, c.width.toFloat(), c.height.toFloat(), Path.Direction.CW)
-                tileRectPath.transform(c.matrix)
-                tileRectPath.offset(c.left.toFloat(), c.top.toFloat())
-                holePath.addPath(tileRectPath)
             }
+            tileRectPath.transform(c.matrix)
+            tileRectPath.offset(c.left.toFloat(), c.top.toFloat())
+            holePath.addPath(tileRectPath)
         }
         val save = canvas.save()
-        canvas.clipOutPath(holePath)
+        canvas.clipOutPath(staticHoles)
+        if (!holePath.isEmpty) canvas.clipOutPath(holePath)
         canvas.drawColor(Color.BLACK)
         canvas.restoreToCount(save)
     }

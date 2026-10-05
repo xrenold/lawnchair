@@ -25,6 +25,7 @@ class PhotoSlideshow(private val view: View) {
     private val visible = android.graphics.Rect()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val m = Matrix()
+    private val shaders = java.util.WeakHashMap<Bitmap, BitmapShader>()
 
     private var uris: List<Uri> = emptyList()
     private var index = 0
@@ -129,7 +130,7 @@ class PhotoSlideshow(private val view: View) {
         val py = 0.5f + 0.3f * dirY * (t - 0.5f)
         m.setScale(s, s)
         m.postTranslate(-extraX * px, -extraY * py)
-        val shader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        val shader = shaders.getOrPut(bmp) { BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
         shader.setLocalMatrix(m)
         paint.shader = shader
         paint.alpha = alpha

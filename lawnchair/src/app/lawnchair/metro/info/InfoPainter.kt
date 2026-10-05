@@ -176,13 +176,9 @@ class InfoPainter(private val context: Context) {
         if (today.isNotEmpty()) {
             eventRows(canvas, today.take(3), left, pad, w - pad, h - pad, k, on, withDay = false)
         } else {
-            text.color = on
-            text.textSize = maxOf(sp(14f) * k, sp(11.5f))
-            line(canvas, "nothing else today", left, pad + text.textSize, w - pad - left, text)
-            val tomorrow = InfoTiles.events.firstOrNull { InfoTiles.dayOf(it.begin) > today() }
-            if (tomorrow != null) {
-                eventRows(canvas, listOf(tomorrow), left, pad + text.textSize + dp(10f) * k, w - pad, h - pad, k, on, withDay = true)
-            }
+            // Nothing left today: straight to what's next.
+            val next = InfoTiles.events.filter { InfoTiles.dayOf(it.begin) > today() }.take(3)
+            if (next.isNotEmpty()) eventRows(canvas, next, left, pad, w - pad, h - pad, k, on, withDay = true)
         }
     }
 
@@ -196,15 +192,10 @@ class InfoPainter(private val context: Context) {
         val t1 = today() + InfoTiles.DAY
         val today = todayEvents()
         val tomorrow = InfoTiles.events.filter { InfoTiles.dayOf(it.begin) == t1 || (it.allDay && it.begin <= t1 && it.end > t1) }
-        if (today.isEmpty()) {
-            text.color = on
-            text.textSize = maxOf(sp(14f) * k, sp(11.5f))
-            line(canvas, "nothing else today", pad, y + text.textSize, w - pad * 2, text)
-            y += text.textSize + dp(12f) * k
-        } else {
+        if (today.isNotEmpty()) {
             y = eventRows(canvas, today.take(5), pad, y, w - pad, bottom, k, on, withDay = false)
         }
-        val shown = eventHits.size + if (today.isEmpty()) 1 else 0
+        val shown = eventHits.size
         if (tomorrow.isNotEmpty() && shown < 5 && y < bottom - dp(30f) * k) {
             text.color = dim(on)
             text.textSize = maxOf(sp(12f) * k, sp(10f))
@@ -288,32 +279,75 @@ class InfoPainter(private val context: Context) {
 
     // ---- Next alarm ------------------------------------------------------------------------------
 
-    /** Returns false when no alarm is set (normal icon). */
-    fun drawAlarm(canvas: Canvas, w: Float, h: Float, size: TileSize, k: Float, on: Int): Boolean {
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val ringRect = RectF()
+
+    /**
+     * The alarm glyph inside a ring that fills up as the alarm gets closer: empty a day ahead,
+     * half full 12 hours before, nearly full in the last hour.
+     */
+    private fun drawAlarmRing(canvas: Canvas, cx: Float, cy: Float, radius: Float, k: Float, on: Int, until: Long, glyph: (Canvas, Float, Float, Float) -> Unit) {
+        val fill = (1f - until / InfoTiles.DAY.toFloat()).coerceIn(0f, 1f)
+        ring.strokeWidth = maxOf(dp(2f) * k, dp(1.5f))
+        ringRect.set(cx - radius, cy - radius, cx + radius, cy + radius)
+        ring.color = ColorUtils.setAlphaComponent(on, 0x40)
+        canvas.drawOval(ringRect, ring)
+        ring.color = on
+        if (fill > 0f) canvas.drawArc(ringRect, -90f, 360f * fill, false, ring)
+        val g = radius * 1.05f
+        glyph(canvas, cx - g / 2f, cy - g / 2f, g)
+    }
+
+    /** "in 7 h 20 min", "in 45 min". */
+    private fun untilText(until: Long): String {
+        val mins = (until / 60_000L).coerceAtLeast(1)
+        val h = mins / 60
+        val m = mins % 60
+        return when {
+            h == 0L -> "in $m min"
+            m == 0L -> "in $h h"
+            else -> "in $h h $m min"
+        }
+    }
+
+    /**
+     * Next alarm: the time with the clock glyph in its filling ring. [glyph] draws the app's
+     * glyph into a square (left, top, size). Returns false when no alarm is set (normal icon).
+     */
+    fun drawAlarm(canvas: Canvas, w: Float, h: Float, size: TileSize, k: Float, on: Int, glyph: (Canvas, Float, Float, Float) -> Unit): Boolean {
         val a = InfoTiles.alarm ?: return false
-        if (a.time < now()) return false
+        val until = a.time - now()
+        if (until < 0) return false
         val time = timeOf(a.time)
         big.color = on
         if (size == TileSize.SMALL) {
-            big.textSize = h * 0.30f
+            // Ring and glyph on top, the time below.
+            val r = minOf(w, h) * 0.2f
+            drawAlarmRing(canvas, w / 2f, h * 0.36f, r, k, on, until, glyph)
+            big.textSize = h * 0.2f
             while (big.measureText(time) > w * 0.86f && big.textSize > 6f) big.textSize *= 0.92f
-            canvas.drawText(time, (w - big.measureText(time)) / 2f, (h + big.textSize * 0.7f) / 2f, big)
+            canvas.drawText(time, (w - big.measureText(time)) / 2f, h * 0.84f, big)
             return true
         }
         val pad = dp(10f) * k
         val cell = h / size.rowSpan * 2f
+        val r = cell * 0.13f
+        drawAlarmRing(canvas, w - pad - r - dp(2f), pad + r + dp(2f), r, k, on, until, glyph)
         big.textSize = cell * 0.30f
-        while (big.measureText(time) > w - pad * 2 && big.textSize > 6f) big.textSize *= 0.92f
+        while (big.measureText(time) > w - pad * 3 - r * 2 && big.textSize > 6f) big.textSize *= 0.92f
         canvas.drawText(time, pad - dp(1f), pad + big.textSize * 0.85f, big)
         text.color = on
-        text.textSize = maxOf(sp(14f) * k, sp(11f))
+        text.textSize = maxOf(sp(13f) * k, sp(10.5f))
         val dayDiff = ((InfoTiles.dayOf(a.time) - today()) / InfoTiles.DAY).toInt()
         val whenLabel = when (dayDiff) {
             0 -> "today"
             1 -> "tomorrow"
             else -> dayName(a.time)
         }
-        canvas.drawText(whenLabel, pad, pad + big.textSize * 0.85f + text.textSize + dp(6f) * k, text)
+        line(canvas, "$whenLabel · ${untilText(until)}", pad, pad + big.textSize * 0.85f + text.textSize + dp(6f) * k, w - pad * 2, text)
         return true
     }
 }

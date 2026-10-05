@@ -380,7 +380,13 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     fun infoChanged() {
         if (infoKind == InfoKind.PHOTOS) {
             val on = PreferenceManager.getInstance(context).metroPhotoSlideshow.get()
-            if (on) (slideshow ?: PhotoSlideshow(this).also { slideshow = it }).update(InfoTiles.photos) else slideshow = null
+            // Wide tiles show landscape photos first, so less gets cropped.
+            val list = if (tile.size == TileSize.WIDE) {
+                InfoTiles.photos.sortedByDescending { it in InfoTiles.landscapePhotos }
+            } else {
+                InfoTiles.photos
+            }
+            if (on) (slideshow ?: PhotoSlideshow(this).also { slideshow = it }).update(list) else slideshow = null
         }
         if (showingBack && !hasBackFace) resetFace()
         invalidate()
@@ -406,7 +412,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 val a = InfoTiles.alarm ?: return false
                 if (a.time < System.currentTimeMillis()) return false
                 val on = drawFill(canvas)
-                infoPainter.drawAlarm(canvas, w, h, tile.size, k, on)
+                infoPainter.drawAlarm(canvas, w, h, tile.size, k, on) { c, l, t, size -> drawAppIcon(c, l, t, size, on) }
                 drawLabel(canvas, on)
             }
             InfoKind.PHOTOS -> {
@@ -414,7 +420,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 if (!show.draw(canvas, w, h)) return false
                 if (tile.size != TileSize.SMALL) {
                     // A soft shade at the bottom so the name reads on any photo.
-                    photoShade.shader = LinearGradient(0f, h * 0.6f, 0f, h, 0, 0x73000000, Shader.TileMode.CLAMP)
+                    if (photoShadeH != h) {
+                        photoShadeH = h
+                        photoShade.shader = LinearGradient(0f, h * 0.6f, 0f, h, 0, 0x73000000, Shader.TileMode.CLAMP)
+                    }
                     canvas.drawRect(0f, h * 0.6f, w, h, photoShade)
                     drawLabel(canvas, Color.WHITE)
                 }
@@ -468,7 +477,11 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         val onColor: Int
         if (info.isMusic && art != null) {
             drawCover(canvas, art, 0f, 0f, w, h)
-            scrimPaint.shader = LinearGradient(0f, h * 0.4f, 0f, h, 0x00000000, 0xD0000000.toInt(), Shader.TileMode.CLAMP)
+            if (musicScrimH != h || musicScrim == null) {
+                musicScrimH = h
+                musicScrim = LinearGradient(0f, h * 0.4f, 0f, h, 0x00000000, 0xD0000000.toInt(), Shader.TileMode.CLAMP)
+            }
+            scrimPaint.shader = musicScrim
             canvas.drawRect(0f, h * 0.4f, w, h, scrimPaint)
             onColor = Color.WHITE
         } else {
@@ -624,10 +637,30 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     /** Glyphs take [onColor]; icon pack icons keep their colours unless they'd vanish on the tile. */
     private fun iconFilter(onColor: Int): android.graphics.ColorFilter? {
         val info = iconInfo
-        if (info == null) return if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
         val bg = if (isWindow) null else if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tile.color)
-        return info.filterFor(bg, onColor)
+        // Reused while nothing changes, instead of a new filter on every frame.
+        if (filterValid && filterOn == onColor && filterBg == bg && filterIcon === info) return filterCached
+        filterCached = if (info == null) {
+            if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
+        } else {
+            info.filterFor(bg, onColor)
+        }
+        filterOn = onColor
+        filterBg = bg
+        filterIcon = info
+        filterValid = true
+        return filterCached
     }
+
+    private var filterValid = false
+    private var filterOn = 0
+    private var filterBg: Int? = null
+    private var filterIcon: MetroIcons.Icon? = null
+    private var filterCached: android.graphics.ColorFilter? = null
+    private var photoShadeH = -1f
+    private var musicScrimH = -1f
+    private var musicScrim: LinearGradient? = null
+    private val shaders = java.util.WeakHashMap<Bitmap, BitmapShader>()
 
     /** Reloads the icon (icon pack or Material You colours changed). */
     fun reloadIcon() = loadIconAsync()
@@ -723,7 +756,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     /** Draws [bmp] scaled to fill the rectangle, cropping the overflow (centre-crop). */
     private fun drawCover(canvas: Canvas, bmp: Bitmap, l: Float, t: Float, r: Float, b: Float, paint: Paint = artPaint) {
-        val shader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        val shader = shaders.getOrPut(bmp) { BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
         val scale = maxOf((r - l) / bmp.width, (b - t) / bmp.height)
         shaderMatrix.setScale(scale, scale)
         shaderMatrix.postTranslate(l + ((r - l) - bmp.width * scale) / 2f, t + ((b - t) - bmp.height * scale) / 2f)

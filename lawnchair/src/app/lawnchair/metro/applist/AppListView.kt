@@ -112,9 +112,16 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     var startView: StartView? = null
 
     private val updateListener = AllAppsStore.OnUpdateListener { refreshApps() }
-    private val liveListener: (Map<String, LiveInfo>) -> Unit = {
-        live = it
-        refreshList()
+    private val liveListener: (Map<String, LiveInfo>) -> Unit = { next ->
+        // Only rows whose snippet actually changed are redrawn.
+        val old = live
+        live = next
+        val changed = (old.keys + next.keys).filterTo(HashSet()) { pkg -> snippetFor(pkg, old)?.toString() != snippetFor(pkg, next)?.toString() }
+        if (changed.isNotEmpty()) {
+            rows.forEachIndexed { i, r ->
+                if (r is Row.App && r.info.componentName?.packageName in changed) adapter.notifyItemChanged(i)
+            }
+        }
         panel?.refresh()
     }
 
@@ -529,8 +536,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     }
 
     /** One-line notification snippet for the list, e.g. "John: See you at 5!". */
-    private fun snippetFor(pkg: String?): CharSequence? {
-        val info = live[pkg ?: return null] ?: return null
+    private fun snippetFor(pkg: String?, from: Map<String, LiveInfo> = live): CharSequence? {
+        val info = from[pkg ?: return null] ?: return null
         if (info.isMusic) {
             val title = info.title ?: return null
             return if (info.text != null) "♪ $title · ${info.text}" else "♪ $title"

@@ -44,7 +44,27 @@ object MetroIcons {
         val brandColor: Int,
         val brandTile: Int = 0,
         val brandStrength: Float = 0f,
-    )
+        /** Drawn from the chosen icon pack: shown in its own colours, not tinted. */
+        val fromPack: Boolean = false,
+        /** Average colour of the pack icon's lines, to check contrast against the tile. */
+        val packColor: Int = 0,
+    ) {
+        /**
+         * How to colour this icon on a background: monochrome glyphs take [onColor]; pack icons
+         * keep their colours unless they'd nearly vanish on a solid [background] (an accent
+         * icon on an accent tile), in which case they're drawn white. [background] is null for
+         * wallpaper or black behind the icon.
+         */
+        fun filterFor(background: Int?, onColor: Int): android.graphics.ColorFilter? = when {
+            monochrome -> android.graphics.PorterDuffColorFilter(onColor, android.graphics.PorterDuff.Mode.SRC_IN)
+            fromPack && background != null && packColor != 0 &&
+                androidx.core.graphics.ColorUtils.calculateContrast(
+                    androidx.core.graphics.ColorUtils.setAlphaComponent(packColor, 255),
+                    androidx.core.graphics.ColorUtils.setAlphaComponent(background, 255),
+                ) < 2.2 -> android.graphics.PorterDuffColorFilter(onColor, android.graphics.PorterDuff.Mode.SRC_IN)
+            else -> null
+        }
+    }
 
     private val cache = LruCache<String, Icon>(400)
     private val executor = Executors.newFixedThreadPool(2)
@@ -52,6 +72,39 @@ object MetroIcons {
     private const val RENDER_SIZE = 192
 
     private fun key(cn: ComponentName, user: UserHandle) = cn.flattenToShortString() + "#" + user.hashCode()
+
+    /** The chosen icon pack, loaded once (Lawnchair's icon pack support). */
+    private fun packIcon(context: Context, target: ComponentName, user: UserHandle): Drawable? {
+        val pkg = app.lawnchair.preferences.PreferenceManager.getInstance(context).metroIconPack.get()
+        if (pkg.isEmpty()) return null
+        return runCatching {
+            val provider = app.lawnchair.icons.iconpack.IconPackProvider.INSTANCE.get(context)
+            val pack = provider.getIconPack(pkg) ?: return null
+            pack.loadBlocking()
+            val entry = pack.getIcon(target) ?: return null
+            provider.getDrawable(entry, context.resources.displayMetrics.densityDpi, user)
+        }.getOrNull()
+    }
+
+    /** Average colour of the visible pixels of [bmp]. */
+    private fun averageColor(bmp: Bitmap): Int {
+        val small = Bitmap.createScaledBitmap(bmp, 32, 32, true)
+        val px = IntArray(32 * 32)
+        small.getPixels(px, 0, 32, 0, 0, 32, 32)
+        var r = 0L
+        var g = 0L
+        var b = 0L
+        var n = 0L
+        for (c in px) {
+            if ((c ushr 24) < 160) continue
+            r += (c shr 16) and 0xFF
+            g += (c shr 8) and 0xFF
+            b += c and 0xFF
+            n++
+        }
+        if (n == 0L) return 0
+        return android.graphics.Color.rgb((r / n).toInt(), (g / n).toInt(), (b / n).toInt())
+    }
 
     /** Returns the cached icon, or null and delivers it to [onLoaded] on the main thread later. */
     @JvmStatic
@@ -116,13 +169,19 @@ object MetroIcons {
             mono = full.monochrome
         }
         val label = runCatching { info?.label }.getOrNull() ?: target.packageName
-        val bitmap = runCatching { (mono ?: full)?.let(::renderTrimmed) }.getOrNull()
+        val packBitmap = packIcon(context, target, user)?.let { d -> runCatching { renderTrimmed(d) }.getOrNull() }
+        val bitmap = packBitmap ?: runCatching { (mono ?: full)?.let(::renderTrimmed) }.getOrNull()
         val brand = runCatching { full?.let(::brandOf) }.getOrNull()
         val appInfo = runCatching { info?.applicationInfo }.getOrNull()
         val preinstalled = appInfo != null && appInfo.flags and
             (android.content.pm.ApplicationInfo.FLAG_SYSTEM or android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
         val tile = if (brand != null && !preinstalled && brand.strength >= 0.62f) brand.tile else 0
-        return Icon(bitmap, mono != null, label, brand?.glow ?: 0, tile, if (tile != 0) brand!!.strength else 0f)
+        return Icon(
+            bitmap, packBitmap == null && mono != null, label, brand?.glow ?: 0, tile,
+            if (tile != 0) brand!!.strength else 0f,
+            fromPack = packBitmap != null,
+            packColor = packBitmap?.let(::averageColor) ?: 0,
+        )
     }
 
     private class Brand(val glow: Int, val tile: Int, val strength: Float)

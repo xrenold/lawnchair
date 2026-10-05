@@ -60,8 +60,14 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
     var topInset = 0f
     var bottomInset = 0f
 
-    private fun spacing(): Float = (height - topInset - bottomInset) / letters.size
-    private fun letterY(i: Int): Float = topInset + spacing() * (i + 0.5f)
+    /**
+     * Letters start a third of the way down the screen, within easy thumb reach; the top third
+     * of the edge is left to normal scrolling.
+     */
+    private val letterTop: Float get() = maxOf(topInset, height / 3f)
+
+    private fun spacing(): Float = (height - letterTop - bottomInset) / letters.size
+    private fun letterY(i: Int): Float = letterTop + spacing() * (i + 0.5f)
 
     override fun onDraw(canvas: Canvas) {
         if (letters.isEmpty()) return
@@ -95,7 +101,7 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
         if (active > 0.01f && sel != null) {
             val r = dp(34f) * active
             val cx = baseX - waveReach - dp(64f)
-            val cy = touchY.coerceIn(topInset + r, height - bottomInset - r)
+            val cy = touchY.coerceIn(letterTop + r, height - bottomInset - r)
             bubblePaint.color = accent
             bubblePaint.alpha = (235 * active).toInt()
             canvas.drawCircle(cx, cy, r, bubblePaint)
@@ -109,7 +115,7 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (ev.x < width - columnWidth - dp(8f)) return false
+                if (ev.x < width - columnWidth - dp(8f) || ev.y < letterTop - dp(8f)) return false
                 parent?.requestDisallowInterceptTouchEvent(true)
                 animateActive(1f)
                 track(ev.y)
@@ -126,7 +132,7 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
 
     private fun track(y: Float) {
         touchY = y
-        val raw = ((y - topInset) / spacing()).toInt().coerceIn(0, letters.size - 1)
+        val raw = ((y - letterTop) / spacing()).toInt().coerceIn(0, letters.size - 1)
         // Snap to the nearest letter that has apps.
         val target = letters.indices
             .filter { letters[it] in available }

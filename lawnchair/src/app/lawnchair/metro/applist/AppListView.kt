@@ -394,7 +394,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Swipe right on an app with notifications opens its panel; elsewhere it closes the list.
+        // Swipe right-to-left on an app with notifications opens its panel (mirroring Start);
+        // left-to-right still closes the list.
         if ((panel == null || panelSwipe.active) && panelSwipe.onTouch(ev)) return true
         if (panel != null) return super.dispatchTouchEvent(ev)
         if (swipeDetector.onTouchEvent(ev)) {
@@ -409,7 +410,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     // ---- Notification panel -------------------------------------------------------------
 
     private var panel: app.lawnchair.metro.notify.NotificationPanel? = null
-    private val panelSwipe = app.lawnchair.metro.notify.PanelSwipe(this, find = { x, y -> panelTargetAt(x, y) }, create = { openPanel(it) })
+    private val panelSwipe = app.lawnchair.metro.notify.PanelSwipe(this, find = { x, y -> panelTargetAt(x, y) }, create = { openPanel(it) }, direction = -1)
 
     val isPanelOpen: Boolean get() = panel != null
 
@@ -435,7 +436,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private fun openPanel(target: app.lawnchair.metro.notify.NotificationPanel.Target): app.lawnchair.metro.notify.NotificationPanel {
         panel?.close(animate = false)
         hideKeyboard()
-        val p = app.lawnchair.metro.notify.NotificationPanel(launcher, target, panelCallbacks)
+        val p = app.lawnchair.metro.notify.NotificationPanel(launcher, target, panelCallbacks, mirrored = true)
         addView(p, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         panel = p
         launcher.setMetroBackEnabled(true)
@@ -639,6 +640,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         private var snippet: CharSequence? = null
         private var icon: Bitmap? = null
         private var mono = false
+        private var loadedIcon: MetroIcons.Icon? = null
         private var brand = 0
         private val square = Paint(Paint.ANTI_ALIAS_FLAG)
         private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -668,11 +670,13 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             contentDescription = if (snippet != null) "${app.title}, $snippet" else app.title
             if (changed) {
                 icon = null
+                loadedIcon = null
                 brand = 0
                 val cn = app.componentName
                 if (cn != null) {
                     val apply = { loaded: MetroIcons.Icon ->
                         if (info === app) {
+                            loadedIcon = loaded
                             icon = loaded.bitmap
                             mono = loaded.monochrome
                             brand = loaded.brandColor
@@ -723,7 +727,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                 val ih = bmp.height * scale
                 iconRect.set(r.centerX() - iw / 2f, r.centerY() - ih / 2f, r.centerX() + iw / 2f, r.centerY() + ih / 2f)
                 val glyph = if (windowMode) Color.WHITE else MetroTheme.onTileColor(base)
-                iconPaint.colorFilter = if (mono) PorterDuffColorFilter(glyph, PorterDuff.Mode.SRC_IN) else null
+                iconPaint.colorFilter = loadedIcon?.filterFor(if (windowMode) null else base, glyph)
+                    ?: if (mono) PorterDuffColorFilter(glyph, PorterDuff.Mode.SRC_IN) else null
                 canvas.drawBitmap(bmp, null, iconRect, iconPaint)
             }
 

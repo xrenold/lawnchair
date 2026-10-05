@@ -36,6 +36,8 @@ import app.lawnchair.metro.widgets.WidgetPicker
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.live.LiveTileData
+import app.lawnchair.metro.info.InfoKind
+import app.lawnchair.metro.info.InfoTiles
 import app.lawnchair.metro.notify.NotificationPanel
 import app.lawnchair.metro.notify.PanelSwipe
 import app.lawnchair.metro.theme.BackgroundDim
@@ -44,6 +46,7 @@ import app.lawnchair.preferences.PreferenceManager
 import com.android.launcher3.Insettable
 import com.android.launcher3.LauncherState
 import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
  * The Metro Start screen: a vertically scrolling grid of tiles that replaces Launcher3's
@@ -69,7 +72,12 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private val prefs = PreferenceManager.getInstance(launcher)
     private var parallax: ParallaxBackgroundView? = null
     private val grid = TileGridView(launcher)
-    private val arrow = ArrowButton(launcher, onTap = { openAppList() }, onHoldComplete = { runAutoLayout() })
+    private val arrow = ArrowButton(
+        launcher,
+        onTap = { openAppList() },
+        onHoldComplete = { onHoldDone() },
+        onHoldProgress = { p, releasing -> showHold(p, releasing) },
+    )
     /**
      * Legibility: an even black layer over the background (photo or wallpaper), stronger the
      * brighter the background. It sits behind the tiles and doesn't move with them, so it also
@@ -168,6 +176,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         store.addListener(storeListener)
         colorListener = MetroTheme.Listener(launcher) { refreshColors() }
         LiveTileData.addListener(launcher, liveListener)
+        InfoTiles.addListener(infoListener)
+        InfoTiles.start(launcher)
+        post { askInfoPermissions() }
         removeCallbacks(liveTicker)
         postDelayed(liveTicker, LIVE_TICK_MS)
     }
@@ -175,6 +186,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     override fun onDetachedFromWindow() {
         removeCallbacks(liveTicker)
         LiveTileData.removeListener(liveListener)
+        InfoTiles.removeListener(infoListener)
+        InfoTiles.stop()
         store.removeListener(storeListener)
         colorListener?.close()
         colorListener = null
@@ -231,6 +244,48 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         invalidate()
     }
 
+    // ---- Info tiles (calendar, weather, next alarm, photos) -------------------------------------
+
+    private val infoListener: () -> Unit = {
+        for (i in 0 until grid.childCount) {
+            val tv = grid.getChildAt(i) as? TileView ?: continue
+            if (tv.infoKind != null) tv.infoChanged()
+        }
+        panel?.refresh()
+    }
+
+    private var grantedInfo = emptySet<String>()
+
+    /**
+     * Asks once for what the info tiles on Start need (calendar, location for weather,
+     * photos). Each permission is asked at most once; tiles fall back to their icon without it.
+     */
+    private fun askInfoPermissions() {
+        val kinds = grid.tiles.mapNotNull { (it as? TileView)?.infoKind }.toSet()
+        val store = launcher.getSharedPreferences("metro_info", Context.MODE_PRIVATE)
+        val needed = kinds.mapNotNull { InfoTiles.permissionFor(it) }
+            .filter { !InfoTiles.hasPermission(launcher, it) && !store.getBoolean("asked_$it", false) }
+        grantedInfo = kinds.mapNotNull { InfoTiles.permissionFor(it) }.filter { InfoTiles.hasPermission(launcher, it) }.toSet()
+        if (needed.isEmpty()) return
+        store.edit().apply { needed.forEach { putBoolean("asked_$it", true) } }.apply()
+        runCatching { launcher.requestPermissions(needed.toTypedArray(), REQUEST_INFO_PERMISSIONS) }
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (!hasWindowFocus) return
+        // Back from the permission prompt (or settings): reload what was just allowed.
+        val kinds = grid.tiles.mapNotNull { (it as? TileView)?.infoKind }.toSet()
+        val now = kinds.mapNotNull { InfoTiles.permissionFor(it) }.filter { InfoTiles.hasPermission(launcher, it) }.toSet()
+        if (now != grantedInfo) {
+            grantedInfo = now
+            InfoTiles.start(launcher)
+        } else {
+            InfoTiles.refreshAlarm()
+            infoListener() // settings such as the photo slideshow may have changed
+        }
+    }
+
     // ---- Live tiles -----------------------------------------------------------------------
 
     private val liveListener: (Map<String, LiveInfo>) -> Unit = { applyLive(it) }
@@ -281,7 +336,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private val liveTicker = object : Runnable {
         override fun run() {
             postDelayed(this, LIVE_TICK_MS + random.nextInt(600))
-            if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() || panelOpen) return
+            if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() || panelOpen || holdShown) return
             val now = System.currentTimeMillis()
             val onScreen = (0 until grid.childCount)
                 .mapNotNull { grid.getChildAt(it) as? TileView }
@@ -350,6 +405,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** Repaints every tile, e.g. after the Monet palette changed. */
     fun refreshColors() {
         updateDim()
+        // Material You icon packs recolour with the wallpaper: load them again.
+        if (prefs.metroIconPack.get().isNotEmpty()) {
+            app.lawnchair.metro.theme.MetroIcons.clear()
+            for (i in 0 until grid.childCount) (grid.getChildAt(i) as? TileView)?.reloadIcon()
+        }
         for (i in 0 until grid.childCount) (grid.getChildAt(i) as? TileView)?.refreshColors()
         arrow.invalidate()
         invalidate()
@@ -420,6 +480,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private fun createAppTile(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
+        if (tile.isApp) infoKind = InfoTiles.kindOf(tile.component.packageName)
+        infoChanged()
         onIconLoaded = { scheduleBrands() }
         setOnClickListener { startApp(this) }
         // Long-press picks the tile up: drag to move it, or let go in place for its menu.
@@ -435,6 +497,15 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val bounds = Rect()
         view.getGlobalVisibleRect(bounds)
         val options = ActivityOptions.makeClipRevealAnimation(view, 0, 0, view.width, view.height).toBundle()
+        // Info tiles: tap an event on the calendar tile to open it; the clock tile opens the alarm.
+        view.calendarEventAt(view.downX, view.downY)?.let {
+            InfoTiles.openEvent(launcher, it)
+            return
+        }
+        if (view.infoKind == InfoKind.CLOCK) {
+            val pi = InfoTiles.alarm?.showIntent
+            if (pi != null && runCatching { pi.send() }.isSuccess) return
+        }
         runCatching {
             val t = view.tile
             if (t.kind == MetroTile.Kind.SHORTCUT) {
@@ -468,6 +539,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 colors.add(GROUP_COLOR, i + 3, i + 3, name.replaceFirstChar { it.uppercase() })
             }
         }
+        val isPhotos = (view as? TileView)?.infoKind == InfoKind.PHOTOS
+        if (isPhotos) {
+            menu.menu.add(Menu.NONE, MENU_SLIDESHOW, 2, if (prefs.metroPhotoSlideshow.get()) "Turn photo slideshow off" else "Turn photo slideshow on")
+        }
         menu.menu.add(Menu.NONE, MENU_LOCK, 2, if (tile.locked) "Unlock tile" else "Lock tile (auto layout keeps it)")
         menu.menu.add(Menu.NONE, MENU_UNPIN, 3, if (isWidget) "Remove widget" else "Unpin from Start")
         if (!isWidget) menu.menu.add(Menu.NONE, MENU_INFO, 4, "App info")
@@ -478,6 +553,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     tile.size = TileSize.entries[item.itemId]
                     if (tile.isApp) MetroUsage.recordSize(launcher, tile.component.packageName, tile.size)
                     commit(view)
+                }
+                item.itemId == MENU_SLIDESHOW -> {
+                    prefs.metroPhotoSlideshow.set(!prefs.metroPhotoSlideshow.get())
+                    (view as? TileView)?.infoChanged()
                 }
                 item.itemId == MENU_LOCK -> {
                     tile.locked = !tile.locked
@@ -716,6 +795,64 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     // ---- Auto layout --------------------------------------------------------------------
 
+    /** True while the hold on the arrow is being shown on the tiles. */
+    private var holdShown = false
+    private val holdLoc = IntArray(2)
+    private val tileLoc = IntArray(2)
+
+    /**
+     * Shows the arrow hold across Start, so it's visible past the thumb: every tile on screen
+     * sinks back (to ~92%) and dims slightly, led by the tiles nearest the arrow. From a third
+     * of the way, tiles start to wiggle, each at its own rhythm, growing to about 3°. Winding
+     * back (let go, or done) the wiggle stops at once and the tiles rise again.
+     */
+    private fun showHold(p: Float, releasing: Boolean) {
+        if (!releasing) holdCompleted = false
+        if (releasing && holdCompleted) return // onHoldDone restores the tiles itself
+        holdShown = p > 0f
+        arrow.getLocationOnScreen(holdLoc)
+        val ax = holdLoc[0] + arrow.width / 2f
+        val ay = holdLoc[1] + arrow.height / 2f
+        val reach = hypot(width.toFloat(), height.toFloat()).coerceAtLeast(1f)
+        val now = android.os.SystemClock.uptimeMillis()
+        for (v in grid.tiles) {
+            if (v === grid.draggedView) continue
+            v.getLocationOnScreen(tileLoc)
+            val d = (hypot(tileLoc[0] + v.width / 2f - ax, tileLoc[1] + v.height / 2f - ay) / reach).coerceIn(0f, 1f)
+            // Nearest tiles lead, farther ones follow a little behind.
+            val local = ((p * 1.3f) - d * 0.3f).coerceIn(0f, 1f)
+            val s = 1f - 0.08f * local
+            v.scaleX = s
+            v.scaleY = s
+            v.alpha = 1f - 0.22f * local
+            v.rotation = if (releasing || p < 1f / 3f) {
+                0f
+            } else {
+                val w = ((p - 1f / 3f) / (2f / 3f)).coerceIn(0f, 1f)
+                val id = (v as TileHolder).tile.id
+                val freq = 0.018f + (id % 7) * 0.0025f // radians per ms: a few wobbles a second
+                val phase = (id * 1.7f) % 6.28f
+                (1f + 2f * w) * kotlin.math.sin(now * freq + phase)
+            }
+        }
+        grid.invalidate()
+    }
+
+    /** Hold finished: the wiggle stops, a beat of stillness, then the tiles rearrange. */
+    private fun onHoldDone() {
+        holdCompleted = true
+        holdShown = false
+        grid.tiles.forEach {
+            it.rotation = 0f
+            it.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(120).setDuration(160)
+                .setUpdateListener { grid.invalidate() }.start()
+        }
+        grid.invalidate()
+        postDelayed({ runAutoLayout() }, 200)
+    }
+
+    private var holdCompleted = false
+
     private val undoBar = UndoBar(launcher)
 
     /** Rearranges Start from usage (hold the arrow). Undo restores the previous layout. */
@@ -808,6 +945,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             val t = gy + tv.top
             if (x < l || x >= l + tv.width || y < t || y >= t + tv.height) continue
             val pkg = tv.tile.component.packageName
+            if (tv.infoKind == InfoKind.CALENDAR && InfoTiles.hasPermission(launcher, android.Manifest.permission.READ_CALENDAR)) {
+                return NotificationPanel.Target(pkg, tv.label, tv.iconInfo?.brandColor ?: 0, Rect(l, t, l + tv.width, t + tv.height), tv, agenda = true)
+            }
             if ((tv.live?.count ?: 0) == 0 || !LiveTileData.hasPanelContent(pkg)) return null
             val brand = tv.iconInfo?.brandColor ?: 0
             return NotificationPanel.Target(pkg, tv.label, brand, Rect(l, t, l + tv.width, t + tv.height), tv)
@@ -863,6 +1003,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_UNPIN = 102
         private const val MENU_INFO = 103
         private const val MENU_LOCK = 104
+        private const val MENU_SLIDESHOW = 105
+        private const val REQUEST_INFO_PERMISSIONS = 7400
         private const val GROUP_SIZE = 1
         private const val GROUP_COLOR = 2
         private const val LIVE_TICK_MS = 1100L

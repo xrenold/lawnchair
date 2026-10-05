@@ -127,12 +127,13 @@ class TileGridView(context: Context) : ViewGroup(context) {
     /** Rows before which a group gap sits. */
     private var gapRows = IntArray(0)
 
-    /** Rows of small tiles that fit in [viewportHeight] below the top inset (one gap allowed). */
+    /** Rows of small tiles that fit in [viewportHeight] below the top inset (top space and one gap allowed). */
     fun rowsInViewport(viewportHeight: Int): Int =
-        ((viewportHeight - topPadding - bottomInset - groupGap + gutter) / rowPitch.coerceAtLeast(1)).coerceAtLeast(2)
+        ((viewportHeight - topPadding - bottomInset - groupGap * 2 + gutter) / rowPitch.coerceAtLeast(1)).coerceAtLeast(2)
 
     /** Top of cell row [row], counting the group gaps above it. */
-    private fun rowTop(row: Int): Int = topPadding + row * (cellSize + gutter) + groupGap * gapRows.count { it <= row }
+    private fun rowTop(row: Int): Int =
+        topPadding + groupGap + row * (cellSize + gutter) + groupGap * gapRows.count { it <= row }
 
     /** Picks group-gap rows from where the tiles sit (see the class comment). */
     private fun computeGaps(tileViews: List<View>, usedRows: Int) {
@@ -185,7 +186,8 @@ class TileGridView(context: Context) : ViewGroup(context) {
         )
         computeGaps(tileViews, rows)
         val contentHeight = if (rows == 0) 0 else rows * cellSize + (rows - 1) * gutter + groupGap * gapRows.size
-        contentBottom = topPadding + contentHeight
+        // Start opens with the same pause that separates its groups.
+        contentBottom = topPadding + groupGap + contentHeight
         val footerSpace = if (footer != null) footerMargin * 2 + footerSize else dp(24f).toInt()
         var height = contentBottom + footerSpace + bottomInset
         // ScrollView's fillViewport passes the screen height; never be shorter than that, so the

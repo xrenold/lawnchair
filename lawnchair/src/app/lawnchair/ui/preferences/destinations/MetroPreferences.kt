@@ -99,6 +99,22 @@ fun MetroPreferenceGroups() {
 
     ExpandAndShrink(visible = startEnabled.state.value) {
         PreferenceGroup(heading = "Tiles & colors") {
+            val iconCtx = LocalContext.current
+            val packs = androidx.compose.runtime.remember {
+                val pm = iconCtx.packageManager
+                app.lawnchair.ui.preferences.iconPackIntents
+                    .flatMap { runCatching { pm.queryIntentActivities(it, 0) }.getOrDefault(emptyList()) }
+                    .associateBy { it.activityInfo.packageName }
+                    .map { (pkg, info) -> pkg to info.loadLabel(pm).toString() }
+                    .sortedBy { it.second.lowercase() }
+            }
+            ListPreference(
+                adapter = prefs.metroIconPack.getAdapter(),
+                label = "Icon pack",
+                description = "Line packs like Arcticons suit tiles best. Apps the pack doesn't cover keep their usual icon.",
+                entries = listOf(ListPreferenceEntry("") { "None (system icons)" }) +
+                    packs.map { (pkg, name) -> ListPreferenceEntry(pkg) { name } },
+            )
             SliderPreference(
                 label = "Tile icon size",
                 adapter = prefs.metroIconSize.getAdapter(),
@@ -135,6 +151,65 @@ fun MetroPreferenceGroups() {
                     },
                 )
             }
+        }
+    }
+
+    ExpandAndShrink(visible = startEnabled.state.value) {
+        PreferenceGroup(heading = "Info tiles") {
+            val ctx = LocalContext.current
+            val needed = listOf(
+                android.Manifest.permission.READ_CALENDAR,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_IMAGES else android.Manifest.permission.READ_EXTERNAL_STORAGE,
+            )
+            val granted = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(needed.filter { app.lawnchair.metro.info.InfoTiles.hasPermission(ctx, it) }.toSet()) }
+            val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+                granted.value = needed.filter { app.lawnchair.metro.info.InfoTiles.hasPermission(ctx, it) }.toSet()
+            }
+            ClickablePreference(
+                label = "Calendar, weather and photos access",
+                subtitle = if (granted.value.size == needed.size) {
+                    "Your Google Calendar, Weather, Clock and Google Photos tiles are live."
+                } else {
+                    "Tap to allow calendar, approximate location (weather) and photos, so those tiles can come alive."
+                },
+                onClick = { ask.launch(needed.toTypedArray()) },
+            )
+            ClickablePreference(
+                label = "Calendars shown",
+                subtitle = "Choose which calendars appear on the calendar tile",
+                onClick = {
+                    val cals = app.lawnchair.metro.info.InfoTiles.calendars(ctx)
+                    if (cals.isEmpty()) {
+                        Toast.makeText(ctx, "Allow calendar access first", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val hiddenPref = prefs.metroHiddenCalendars
+                        val hidden = hiddenPref.get().split(',').mapNotNull { it.trim().toLongOrNull() }.toMutableSet()
+                        val checked = BooleanArray(cals.size) { cals[it].first !in hidden }
+                        android.app.AlertDialog.Builder(ctx)
+                            .setTitle("Calendars shown")
+                            .setMultiChoiceItems(cals.map { it.second }.toTypedArray(), checked) { _, i, on ->
+                                if (on) hidden -= cals[i].first else hidden += cals[i].first
+                            }
+                            .setPositiveButton(android.R.string.ok) { _, _ ->
+                                hiddenPref.set(hidden.joinToString(","))
+                                app.lawnchair.metro.info.InfoTiles.refreshCalendar()
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
+                    }
+                },
+            )
+            SwitchPreference(
+                adapter = prefs.metroAllDayEvents.getAdapter(),
+                label = "Show all-day events",
+                description = "On the calendar tile and agenda",
+            )
+            SwitchPreference(
+                adapter = prefs.metroPhotoSlideshow.getAdapter(),
+                label = "Photo slideshow",
+                description = "Google Photos tile shows camera photos from the last 30 days",
+            )
         }
     }
 

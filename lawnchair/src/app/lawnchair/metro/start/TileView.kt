@@ -37,6 +37,11 @@ import androidx.dynamicanimation.animation.SpringForce
 import androidx.core.graphics.ColorUtils
 import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.TileSize
+import app.lawnchair.metro.info.CalEvent
+import app.lawnchair.metro.info.InfoKind
+import app.lawnchair.metro.info.InfoPainter
+import app.lawnchair.metro.info.InfoTiles
+import app.lawnchair.metro.info.PhotoSlideshow
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.live.LiveItem
 import app.lawnchair.metro.theme.MetroIcons
@@ -106,6 +111,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     /** A back face exists for music always, and for messages when message peeks are allowed. */
     val hasBackFace: Boolean
         get() {
+            // Info tiles: only the medium calendar tile turns over, to the next event.
+            infoKind?.let { kind ->
+                return kind == InfoKind.CALENDAR && tile.size == TileSize.MEDIUM && infoPainter.nextEvent() != null
+            }
             val info = live ?: return false
             // Album art works at every size, even on small tiles.
             if (info.isMusic) return info.title != null && (tile.size != TileSize.SMALL || info.image != null)
@@ -119,7 +128,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
      * Ongoing content (music, a download, navigation…) stays on the tile for as long as it
      * runs instead of flipping back and forth.
      */
-    val isPinned: Boolean get() = live?.ongoing == true && hasBackFace
+    val isPinned: Boolean get() = infoKind == null && live?.ongoing == true && hasBackFace
 
     /** Shows the back face at once, without animating (for off-screen tiles). */
     fun showBackNow() {
@@ -170,12 +179,6 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     private fun spK(v: Float, min: Float) = maxOf(sp(v) * k, sp(min))
 
-    init {
-        isClickable = true
-        isLongClickable = true
-        isHapticFeedbackEnabled = true
-        loadIconAsync()
-    }
 
     fun setTileData(newTile: MetroTile) {
         val componentChanged = newTile.component != tile.component
@@ -199,6 +202,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 icon = loaded.bitmap
                 iconInfo = loaded
                 label = loaded.label
+                // Weather apps not known by package are recognised by their name.
+                if (infoKind == null && tile.isApp) {
+                    InfoTiles.kindOf(tile.component.packageName, loaded.label)?.let { infoKind = it }
+                }
                 contentDescription = loaded.label
                 backLayouts = null
                 invalidate()
@@ -287,6 +294,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     }
 
     private fun drawFront(canvas: Canvas) {
+        if (infoKind != null && drawInfoFront(canvas)) return
         val w = width.toFloat()
         val h = height.toFloat()
         val count = live?.count ?: 0
@@ -304,7 +312,17 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 TileSize.SMALL -> cell * 0.42f
                 TileSize.LARGE -> cell * 0.62f
                 else -> cell * 0.46f
-            } * userScale * (if (iconIsMonochrome) 1f else 0.9f) // full-colour shapes read heavier than glyphs
+            }.let { b ->
+                // Line icons (icon packs like Arcticons) read lighter than filled glyphs: a
+                // touch bigger, and never spindly on the small 6-column tiles.
+                val pack = iconInfo?.fromPack == true
+                val scaled = b * userScale * when {
+                    pack -> 1.08f
+                    iconIsMonochrome -> 1f
+                    else -> 0.9f // full-colour shapes read heavier than glyphs
+                }
+                if (pack) scaled.coerceAtLeast(dp(20f)) else scaled
+            }
             val scale = box / maxOf(bmp.width, bmp.height)
             val iw = bmp.width * scale
             val ih = bmp.height * scale
@@ -315,7 +333,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             val cx = w / 2f - countW / 2f
             val cy = h / 2f - if (showsLabel) h * 0.05f else 0f
             iconRect.set(cx - iw / 2f, cy - ih / 2f, cx + iw / 2f, cy + ih / 2f)
-            iconPaint.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
+            iconPaint.colorFilter = iconFilter(onColor)
             canvas.drawBitmap(bmp, null, iconRect, iconPaint)
             if (countText != null) {
                 countPaint.color = onColor
@@ -332,13 +350,85 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             canvas.drawText(t, w - dp(5f) - countPaint.measureText(t), h - dp(5f) - countPaint.descent(), countPaint)
         }
 
-        // Label: bottom-left, hidden on small tiles (as on Windows Phone).
-        if (tile.size != TileSize.SMALL && label.isNotEmpty()) {
-            val pad = dp(8f)
-            labelPaint.color = onColor
-            val text = TextUtils.ellipsize(label, labelPaint, w - pad * 2, TextUtils.TruncateAt.END)
-            canvas.drawText(text, 0, text.length, pad, h - pad - labelPaint.descent(), labelPaint)
+        drawLabel(canvas, onColor)
+    }
+
+    /** The app's name, bottom-left, hidden on small tiles (as on Windows Phone). */
+    private fun drawLabel(canvas: Canvas, onColor: Int) {
+        if (tile.size == TileSize.SMALL || label.isEmpty()) return
+        labelPaint.textSize = spK(13f, 11.5f)
+        val pad = dp(8f)
+        labelPaint.color = onColor
+        val text = TextUtils.ellipsize(label, labelPaint, width - pad * 2, TextUtils.TruncateAt.END)
+        canvas.drawText(text, 0, text.length, pad, height - pad - labelPaint.descent(), labelPaint)
+    }
+
+    // ---- Info tiles: calendar, weather, next alarm, photos -------------------------------------
+
+    /** Set by Start for the calendar, weather, clock and photos apps. */
+    var infoKind: InfoKind? = null
+        set(value) {
+            field = value
+            invalidate()
         }
+
+    private val infoPainter by lazy { InfoPainter(context) }
+    private var slideshow: PhotoSlideshow? = null
+    private val photoShade = Paint()
+
+    /** Info data changed (or a minute passed): redraw, and keep the slideshow's photos current. */
+    fun infoChanged() {
+        if (infoKind == InfoKind.PHOTOS) {
+            val on = PreferenceManager.getInstance(context).metroPhotoSlideshow.get()
+            if (on) (slideshow ?: PhotoSlideshow(this).also { slideshow = it }).update(InfoTiles.photos) else slideshow = null
+        }
+        if (showingBack && !hasBackFace) resetFace()
+        invalidate()
+    }
+
+    /** Draws the info face; returns false to fall back to the normal icon face. */
+    private fun drawInfoFront(canvas: Canvas): Boolean {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        when (infoKind) {
+            InfoKind.CALENDAR -> {
+                val on = drawFill(canvas)
+                infoPainter.drawCalendarFront(canvas, w, h, tile.size, k, on)
+                drawLabel(canvas, on)
+            }
+            InfoKind.WEATHER -> {
+                if (InfoTiles.weather == null) return false
+                val on = drawFill(canvas)
+                if (!infoPainter.drawWeather(canvas, w, h, tile.size, k, on)) return false
+                drawLabel(canvas, on)
+            }
+            InfoKind.CLOCK -> {
+                val a = InfoTiles.alarm ?: return false
+                if (a.time < System.currentTimeMillis()) return false
+                val on = drawFill(canvas)
+                infoPainter.drawAlarm(canvas, w, h, tile.size, k, on)
+                drawLabel(canvas, on)
+            }
+            InfoKind.PHOTOS -> {
+                val show = slideshow ?: return false
+                if (!show.draw(canvas, w, h)) return false
+                if (tile.size != TileSize.SMALL) {
+                    // A soft shade at the bottom so the name reads on any photo.
+                    photoShade.shader = LinearGradient(0f, h * 0.6f, 0f, h, 0, 0x73000000, Shader.TileMode.CLAMP)
+                    canvas.drawRect(0f, h * 0.6f, w, h, photoShade)
+                    drawLabel(canvas, Color.WHITE)
+                }
+            }
+            null -> return false
+        }
+        return true
+    }
+
+    /** The calendar event drawn under (x, y) on a wide or large calendar tile, if any. */
+    fun calendarEventAt(x: Float, y: Float): CalEvent? {
+        if (infoKind != InfoKind.CALENDAR || showingBack) return null
+        if (tile.size != TileSize.WIDE && tile.size != TileSize.LARGE) return null
+        return infoPainter.eventHits.firstOrNull { it.first.contains(x, y) }?.second
     }
 
     /**
@@ -350,6 +440,20 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
      * identifiable while flipped.
      */
     private fun drawBack(canvas: Canvas) {
+        if (infoKind == InfoKind.CALENDAR) {
+            // Medium calendar, content side: the next event, the app's name and today's date.
+            val on = drawFill(canvas)
+            val h = height.toFloat()
+            labelPaint.textSize = spK(13f, 11.5f)
+            val footerTop = h - dp(8f) - labelPaint.textSize - dp(6f)
+            infoPainter.drawCalendarBack(canvas, width.toFloat(), h, k, on, footerTop)
+            drawLabel(canvas, on)
+            val day = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_MONTH).toString()
+            countPaint.textSize = spK(13f, 11f)
+            countPaint.color = on
+            canvas.drawText(day, width - dp(8f) - countPaint.measureText(day), h - dp(8f) - labelPaint.descent(), countPaint)
+            return
+        }
         val info = live ?: return
         val w = width.toFloat()
         val h = height.toFloat()
@@ -513,9 +617,20 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         val iw = bmp.width * s
         val ih = bmp.height * s
         iconRect.set(left + (size - iw) / 2f, top + (size - ih) / 2f, left + (size + iw) / 2f, top + (size + ih) / 2f)
-        iconPaint.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
+        iconPaint.colorFilter = iconFilter(onColor)
         canvas.drawBitmap(bmp, null, iconRect, iconPaint)
     }
+
+    /** Glyphs take [onColor]; icon pack icons keep their colours unless they'd vanish on the tile. */
+    private fun iconFilter(onColor: Int): android.graphics.ColorFilter? {
+        val info = iconInfo
+        if (info == null) return if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
+        val bg = if (isWindow) null else if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tile.color)
+        return info.filterFor(bg, onColor)
+    }
+
+    /** Reloads the icon (icon pack or Material You colours changed). */
+    fun reloadIcon() = loadIconAsync()
 
     private fun mediumAvatarSize() = dp(34f) * k
 
@@ -836,4 +951,12 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
 
+    // Last in the class: every property above is initialised before the icon loads, so a
+    // cached icon (delivered synchronously) isn't wiped by a later property initialiser.
+    init {
+        isClickable = true
+        isLongClickable = true
+        isHapticFeedbackEnabled = true
+        loadIconAsync()
+    }
 }

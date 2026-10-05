@@ -22,14 +22,18 @@ import kotlin.math.hypot
  * The app-list arrow at the end of Start.
  *
  * Tap: opens the app list. Hold: after the usual long-press delay a halo starts growing
- * around the arrow, an accent ring filling clockwise with a soft glow and light ticks. Hold
- * until it closes to run auto layout; let go early to cancel.
+ * around the arrow, an accent ring filling clockwise with a soft glow. Light haptic ticks mark
+ * one third and two thirds, and a firm click the end. Hold until it closes to run auto layout;
+ * let go early to cancel. [onHoldProgress] lets Start show the hold across the whole screen,
+ * since the thumb covers the button itself.
  */
 @SuppressLint("ViewConstructor")
 class ArrowButton(
     context: Context,
     private val onTap: () -> Unit,
     private val onHoldComplete: () -> Unit,
+    /** Hold progress 0..1; [releasing] is true while it winds back down (let go, or done). */
+    private val onHoldProgress: (progress: Float, releasing: Boolean) -> Unit = { _, _ -> },
 ) : View(context) {
 
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -62,11 +66,12 @@ class ArrowButton(
             interpolator = LinearInterpolator()
             addUpdateListener {
                 progress = it.animatedValue as Float
-                val tick = (progress * 4).toInt()
-                if (tick > lastTick && tick < 4) {
+                val tick = (progress * 3).toInt()
+                if (tick > lastTick && tick < 3) {
                     lastTick = tick
                     performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                 }
+                onHoldProgress(progress, false)
                 if (progress >= 1f && !triggered) complete()
                 invalidate()
             }
@@ -98,6 +103,7 @@ class ArrowButton(
             interpolator = DecelerateInterpolator()
             addUpdateListener {
                 progress = it.animatedValue as Float
+                onHoldProgress(progress, true)
                 invalidate()
             }
             start()

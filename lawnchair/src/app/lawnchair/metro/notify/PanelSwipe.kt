@@ -9,7 +9,8 @@ import android.view.ViewGroup
 import kotlin.math.abs
 
 /**
- * The swipe-right gesture that opens a [NotificationPanel], shared by Start and the app list.
+ * The sideways swipe that opens a [NotificationPanel], shared by Start (left to right) and the
+ * app list (right to left).
  *
  * Once a swipe on a tile with notifications is clearly sideways, it takes over the gesture (so
  * Start stops scrolling and the tile isn't pressed) and the panel slides out with the finger.
@@ -22,6 +23,8 @@ class PanelSwipe(
     private val find: (Float, Float) -> NotificationPanel.Target?,
     /** Creates and adds the panel (at progress 0) for a target. */
     private val create: (NotificationPanel.Target) -> NotificationPanel,
+    /** 1: swipe left-to-right opens (Start). -1: right-to-left opens (app list). */
+    private val direction: Int = 1,
 ) {
     private val slop = ViewConfiguration.get(host.context).scaledTouchSlop
     private var target: NotificationPanel.Target? = null
@@ -52,7 +55,7 @@ class PanelSwipe(
         }
         velocity?.addMovement(ev)
         val t = target ?: return false
-        val dx = ev.x - downX
+        val dx = (ev.x - downX) * direction
         when (ev.actionMasked) {
             MotionEvent.ACTION_MOVE -> {
                 if (panel == null) {
@@ -83,7 +86,7 @@ class PanelSwipe(
                     return false
                 }
                 velocity?.computeCurrentVelocity(1000)
-                val vx = velocity?.xVelocity ?: 0f
+                val vx = (velocity?.xVelocity ?: 0f) * direction
                 val fling = vx > host.resources.displayMetrics.density * 800
                 if (ev.actionMasked == MotionEvent.ACTION_UP && (pastThreshold || fling)) p.animateOpen() else p.close(animate = true)
                 panel = null

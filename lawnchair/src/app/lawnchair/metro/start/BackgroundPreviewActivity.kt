@@ -75,6 +75,7 @@ class BackgroundPreviewActivity : Activity() {
     private var luminance = 0f
     private var topInset = 0
     private var applying = false
+    private var setWallpaper = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -255,6 +256,11 @@ class BackgroundPreviewActivity : Activity() {
             level = i
             applyDim()
         })
+        setWallpaper = prefs.metroSetSystemWallpaper.get()
+        box.addView(segmented("phone", listOf("keep wallpaper", "set home screen"), if (setWallpaper) 1 else 0) { i ->
+            setWallpaper = i == 1
+            prefs.metroSetSystemWallpaper.set(setWallpaper)
+        })
         box.addView(segmented("view", listOf("start", "app list"), 0) { i ->
             showList = i == 1
             animatePan(if (showList) 1f else 0f)
@@ -343,6 +349,7 @@ class BackgroundPreviewActivity : Activity() {
                     crop
                 }
                 ParallaxBackgroundView.file(this).outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+                if (setWallpaper) setHomeWallpaper(crop)
             }.isSuccess
             main.post {
                 if (!ok) {
@@ -357,6 +364,24 @@ class BackgroundPreviewActivity : Activity() {
                 finish()
             }
         }
+    }
+
+    /**
+     * Sets the phone's home screen wallpaper to exactly what Start shows at rest: the
+     * screen-sized top-left part of the saved crop (the rest is parallax room), at full screen
+     * resolution, with the same dim Start applies. The return-home flash then matches Start.
+     */
+    private fun setHomeWallpaper(crop: Bitmap) {
+        val bounds = windowManager.currentWindowMetrics.bounds
+        val sw = crop.width / (1 + ParallaxBackgroundView.TRAVEL_X)
+        val sh = crop.height / (1 + ParallaxBackgroundView.TRAVEL_Y)
+        val screenPart = Bitmap.createBitmap(crop, 0, 0, sw.toInt().coerceIn(1, crop.width), sh.toInt().coerceIn(1, crop.height))
+        val out = Bitmap.createBitmap(bounds.width(), bounds.height(), Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        c.drawBitmap(screenPart, null, android.graphics.Rect(0, 0, out.width, out.height), Paint(Paint.FILTER_BITMAP_FLAG))
+        val dimAlpha = BackgroundDim.dimFor(luminance, level)
+        if (dimAlpha > 0f) c.drawColor(androidx.core.graphics.ColorUtils.setAlphaComponent(Color.BLACK, (dimAlpha * 255).toInt()))
+        android.app.WallpaperManager.getInstance(this).setBitmap(out, null, true, android.app.WallpaperManager.FLAG_SYSTEM)
     }
 
     override fun onDestroy() {
@@ -438,8 +463,9 @@ class BackgroundPreviewActivity : Activity() {
         }
 
         private fun clamp(bmp: Bitmap) {
-            tx = tx.coerceIn(regionW - bmp.width * scale, 0f)
-            ty = ty.coerceIn(regionH - bmp.height * scale, 0f)
+            // min() keeps the range valid when rounding leaves the photo a hair short.
+            tx = tx.coerceIn(minOf(regionW - bmp.width * scale, 0f), 0f)
+            ty = ty.coerceIn(minOf(regionH - bmp.height * scale, 0f), 0f)
             invalidate()
             onChanged?.invoke()
         }
@@ -448,8 +474,8 @@ class BackgroundPreviewActivity : Activity() {
         fun cropRect(): RectF? {
             val bmp = bitmap ?: return null
             if (width == 0) return null
-            val l = (-tx / scale).coerceIn(0f, bmp.width - 1f)
-            val t = (-ty / scale).coerceIn(0f, bmp.height - 1f)
+            val l = (-tx / scale).coerceIn(0f, maxOf(bmp.width - 1f, 0f))
+            val t = (-ty / scale).coerceIn(0f, maxOf(bmp.height - 1f, 0f))
             val r = (l + regionW / scale).coerceAtMost(bmp.width.toFloat())
             val b = (t + regionH / scale).coerceAtMost(bmp.height.toFloat())
             return RectF(l, t, r, b)

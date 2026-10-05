@@ -10,6 +10,7 @@ import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.MetroUsage
 import app.lawnchair.metro.data.TileSize
 import app.lawnchair.metro.live.LiveTileData
+import app.lawnchair.metro.info.InfoTiles
 import app.lawnchair.metro.theme.MetroIcons
 import app.lawnchair.metro.theme.MetroTheme
 import kotlin.math.max
@@ -38,7 +39,10 @@ object AutoLayout {
 
     class Result(val tiles: List<MetroTile>, val added: Int, val removed: Int)
 
-    private enum class Kind { CHAT, MUSIC, MAIL, CALENDAR, OTHER, WIDGET, SHORTCUT }
+    private enum class Kind { CHAT, MUSIC, MAIL, CALENDAR, OTHER, WIDGET, SHORTCUT, WEATHER, CLOCK, PHOTOS }
+
+    /** Info tiles you glance at rather than open: always kept, in the glance area. */
+    private val INFO = setOf(Kind.CALENDAR, Kind.WEATHER, Kind.CLOCK, Kind.PHOTOS)
 
     private class App(
         val component: ComponentName,
@@ -165,8 +169,18 @@ object AutoLayout {
             return m == size || (size == TileSize.SMALL && m == TileSize.SMALL)
         }
 
+        // Sizes info tiles take: the clock (next alarm) is small; photos, calendar and weather
+        // are medium or wide, never small.
+        // A size you chose yourself always wins.
+        fun mediumOk(a: App) = (a.kind != Kind.CLOCK || manualSize(a) == TileSize.MEDIUM) && okFor(a, TileSize.MEDIUM)
+        fun smallOk(a: App) =
+            (a.kind !in setOf(Kind.PHOTOS, Kind.CALENDAR, Kind.WEATHER) || manualSize(a) == TileSize.SMALL) && okFor(a, TileSize.SMALL)
+
         // ---- Easy-reach area: most-opened apps ----
-        val byTap = ranked.filter { it.kind != Kind.WIDGET && !prefers(it, MetroUsage.Region.TOP) && !prefers(it, MetroUsage.Region.BELOW) }
+        val byTap = ranked.filter {
+            it.kind != Kind.WIDGET && (it.kind !in INFO || prefers(it, MetroUsage.Region.BOTTOM)) &&
+                !prefers(it, MetroUsage.Region.TOP) && !prefers(it, MetroUsage.Region.BELOW)
+        }
             .sortedWith(compareByDescending<App> { prefers(it, MetroUsage.Region.BOTTOM) }.thenByDescending { it.tap })
         val thumbPatterns = thumbPatterns(blocksPerRow)
         // Fill the bottom row first, so the very top apps sit lowest (nearest the thumb).
@@ -176,8 +190,8 @@ object AutoLayout {
             layRow(
                 br,
                 thumbPatterns[k % thumbPatterns.size],
-                mPick = { take(byTap) { okFor(it, TileSize.MEDIUM) } },
-                sPick = { take(byTap) { okFor(it, TileSize.SMALL) } },
+                mPick = { take(byTap) { mediumOk(it) } },
+                sPick = { take(byTap) { smallOk(it) } },
                 wPick = { if (windowMode) take(byTap) { wideOk(it) && okFor(it, TileSize.WIDE) } else null },
             )
         }
@@ -187,24 +201,40 @@ object AutoLayout {
             .sortedWith(
                 compareByDescending<App> { it.kind == Kind.WIDGET }
                     .thenByDescending { prefers(it, MetroUsage.Region.TOP) }
+                    .thenByDescending { it.kind in INFO }
                     .thenByDescending { it.kind != Kind.OTHER && it.kind != Kind.SHORTCUT }
                     .thenByDescending { it.score },
             )
+
+        // Who gets the wide slots at the top: music that's playing, then the photo slideshow,
+        // then your busiest chat; a busy calendar, widgets and weather after that.
+        val todayEvents = run {
+            val t0 = InfoTiles.dayOf(now)
+            InfoTiles.events.count { it.begin < t0 + InfoTiles.DAY && it.end > now }
+        }
+        fun heroRank(a: App): Double = when {
+            LiveTileData.snapshot[a.pkg]?.let { it.isMusic && it.isPlaying } == true -> 6.0
+            a.kind == Kind.PHOTOS -> 5.0
+            a.kind == Kind.CHAT -> 4.0 + (a.live / 100.0).coerceAtMost(0.9)
+            a.kind == Kind.MUSIC -> 3.5
+            a.kind == Kind.CALENDAR && todayEvents >= 2 -> 3.0
+            a.kind == Kind.WIDGET -> 2.0
+            a.live > 2 -> 1.5
+            a.kind == Kind.WEATHER -> 1.0
+            else -> 0.0
+        }
+        val heroOrder = liveFirst.filter { heroRank(it) > 0 }.sortedByDescending { heroRank(it) }
         val hero = {
-            take(liveFirst) {
-                (it.kind == Kind.MUSIC || it.kind == Kind.CHAT || it.kind == Kind.WIDGET || it.live > 2) &&
-                    wideOk(it) && okFor(it, TileSize.WIDE)
-            } ?: take(liveFirst) {
-                (it.kind == Kind.MUSIC || it.kind == Kind.CHAT || it.kind == Kind.WIDGET || it.live > 2) && okFor(it, TileSize.WIDE)
-            }
+            take(heroOrder) { wideOk(it) && okFor(it, TileSize.WIDE) } ?: take(heroOrder) { okFor(it, TileSize.WIDE) }
         }
         val glancePatterns = glancePatterns(blocksPerRow)
         for (br in 0 until glanceBlockRows) {
             layRow(
                 br,
                 glancePatterns[br % glancePatterns.size],
-                mPick = { take(liveFirst) { okFor(it, TileSize.MEDIUM) } },
-                sPick = { take(liveFirst) { okFor(it, TileSize.SMALL) } },
+                mPick = { take(liveFirst) { mediumOk(it) } },
+                // Quads: the next alarm first, then the rest in order.
+                sPick = { take(liveFirst) { it.kind == Kind.CLOCK && smallOk(it) } ?: take(liveFirst) { smallOk(it) } },
                 wPick = hero,
             )
         }
@@ -212,7 +242,7 @@ object AutoLayout {
         // ---- Below the first screen: the rest worth keeping, same rhythm ----
         // Only apps you actually use earn a place below the first screen.
         // Apps used about as much sit by kind, so similar apps tend to land near each other.
-        val keep = ranked.filter { it.key !in used && (it in forced || it.tap >= 3.0 || it.live >= 2.0) }
+        val keep = ranked.filter { it.key !in used && (it in forced || it.kind in INFO || it.tap >= 3.0 || it.live >= 2.0) }
             .sortedWith(compareByDescending<App> { Math.floor(it.score / 3.0) }.thenBy { it.kind.ordinal }.thenByDescending { it.score })
         val maxExtraBlockRows = screenBlockRows // about one more screen
         val restPatterns = restPatterns(blocksPerRow)
@@ -230,9 +260,9 @@ object AutoLayout {
             layRow(
                 br,
                 pattern,
-                mPick = { take(keep) { mediumWorthy(it) && okFor(it, TileSize.MEDIUM) } ?: take(keep) { okFor(it, TileSize.MEDIUM) } },
+                mPick = { take(keep) { mediumWorthy(it) && mediumOk(it) } ?: take(keep) { mediumOk(it) } },
                 // Quads take the least-used apps, so small tiles hold what you open least.
-                sPick = { keep.lastOrNull { it.key !in used && okFor(it, TileSize.SMALL) }?.also { used += it.key } },
+                sPick = { keep.lastOrNull { it.key !in used && smallOk(it) }?.also { used += it.key } },
                 wPick = {
                     take(keep) { (it.kind != Kind.OTHER || it.live >= 2) && wideOk(it) && okFor(it, TileSize.WIDE) }
                         ?: take(keep) { wideOk(it) && okFor(it, TileSize.WIDE) }
@@ -253,6 +283,10 @@ object AutoLayout {
         }
 
         spreadBrands(placed, columns, screenRows) { t -> isBrandTile(t, t.component) }
+        // Info tiles (calendar, weather, photos, alarm) aren't put side by side either, so the
+        // top doesn't turn into a block of dashboards.
+        val infoPkgs = apps.filter { it.kind in INFO }.map { it.pkg }.toSet()
+        spreadBrands(placed, columns, screenRows) { t -> t.isApp && t.component.packageName in infoPkgs }
 
         // Exact positions -> order: sorting by top-left cell (row, then column) makes the grid's
         // first-fit packing reproduce this layout precisely.
@@ -385,13 +419,26 @@ object AutoLayout {
                 existing = t, manual = null, fixed = t,
             )
         }
+        val slideshowOn = app.lawnchair.preferences.PreferenceManager.getInstance(context).metroPhotoSlideshow.get() &&
+            InfoTiles.hasPermission(context, InfoTiles.permissionFor(app.lawnchair.metro.info.InfoKind.PHOTOS)!!)
+        val alarmSoon = runCatching {
+            val next = context.getSystemService(android.app.AlarmManager::class.java)?.nextAlarmClock
+            next != null && next.triggerTime - System.currentTimeMillis() in 0..DAY
+        }.getOrDefault(false)
         return extras + activities.map { info ->
             val pkg = info.componentName.packageName
             val tap = MetroUsage.launchScore(context, pkg) + (opens[pkg] ?: 0.0) + min(minutes[pkg] ?: 0.0, 900.0) / 30.0
             val notif = MetroUsage.notificationsPerDay(context, pkg) + (activeNow[pkg]?.count ?: 0) * 0.5
             var t = tap
             if (byPkg[pkg] != null) t += 1.0 // a little stability for what's already on Start
-            App(info.componentName, kindOf(pkg, info.applicationInfo), t, notif, byPkg[pkg], MetroUsage.manual(context, pkg))
+            val kind = when (InfoTiles.kindOf(pkg, info.label)) {
+                app.lawnchair.metro.info.InfoKind.CALENDAR -> Kind.CALENDAR
+                app.lawnchair.metro.info.InfoKind.WEATHER -> Kind.WEATHER
+                app.lawnchair.metro.info.InfoKind.CLOCK -> if (alarmSoon) Kind.CLOCK else Kind.OTHER
+                app.lawnchair.metro.info.InfoKind.PHOTOS -> if (slideshowOn) Kind.PHOTOS else Kind.OTHER
+                null -> kindOf(pkg, info.applicationInfo)
+            }
+            App(info.componentName, kind, t, notif, byPkg[pkg], MetroUsage.manual(context, pkg))
         }
     }
 

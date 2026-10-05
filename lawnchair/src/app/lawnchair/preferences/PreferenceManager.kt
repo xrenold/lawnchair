@@ -92,6 +92,16 @@ class PreferenceManager @Inject constructor(
     val metroIconSize = IntPref("pref_metroIconSize", 100, recreate)
     /** Bumped whenever the Start background photo changes, so Start reloads it. */
     val metroBackgroundPhoto = IntPref("pref_metroBackgroundPhoto", 0, recreate)
+    /** Icon pack package for Metro tiles and the app list ("" = system icons). */
+    val metroIconPack = StringPref("pref_metroIconPack", "", recreate)
+    /** Photos tile slideshow on/off. */
+    val metroPhotoSlideshow = BoolPref("pref_metroPhotoSlideshow", true)
+    /** Also set the phone's home screen wallpaper when applying a Start background photo. */
+    val metroSetSystemWallpaper = BoolPref("pref_metroSetSystemWallpaper", true)
+    /** Calendar tile: ids of calendars to hide (comma-separated). */
+    val metroHiddenCalendars = StringPref("pref_metroHiddenCalendars", "")
+    /** Calendar tile shows all-day events. */
+    val metroAllDayEvents = BoolPref("pref_metroAllDayEvents", true)
     /** Live tiles flip to show content. */
     val metroLiveTiles = BoolPref("pref_metroLiveTiles", true, recreate)
     /** Background dim for legibility: 0 off, 1 auto, 2 auto + stronger. */

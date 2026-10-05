@@ -63,7 +63,15 @@ class NotificationPanel(
     context: Context,
     val target: Target,
     private val callbacks: Callbacks,
+    /**
+     * Mirrored for the app list: opened by swiping right to left, it slides in from the right,
+     * swipes right to close, and cards are dismissed to the left.
+     */
+    private val mirrored: Boolean = false,
 ) : FrameLayout(context) {
+
+    /** +1 normally, -1 mirrored: the direction the panel opens and cards are swiped away. */
+    private val dir: Float = if (mirrored) -1f else 1f
 
     /** What the panel belongs to. [anchor] is the tile's rectangle in the host's coordinates. */
     class Target(
@@ -73,6 +81,8 @@ class NotificationPanel(
         val brand: Int,
         val anchor: Rect,
         val view: View?,
+        /** Calendar tile: a read-only 7-day agenda instead of notifications. */
+        val agenda: Boolean = false,
     )
 
     interface Callbacks {
@@ -209,6 +219,10 @@ class NotificationPanel(
     /** Rebuilds the cards from the app's current notifications; closes when none are left. */
     fun refresh() {
         if (closing) return
+        if (target.agenda) {
+            showAgenda()
+            return
+        }
         val items = LiveTileData.notificationsFor(target.pkg).filter { it.key !in dismissedKeys }
         if (items.isEmpty()) {
             emptied = true
@@ -229,6 +243,83 @@ class NotificationPanel(
         shown.forEach { list.addView(Card(it)) }
         footer.visibility = if (items.any { it.isClearable }) VISIBLE else GONE
         requestLayout()
+    }
+
+    /** The next 7 days of events, grouped by day; tap one to open it. */
+    private fun showAgenda() {
+        val events = app.lawnchair.metro.info.InfoTiles.events
+        val today = app.lawnchair.metro.info.InfoTiles.dayOf(System.currentTimeMillis())
+        val end = today + 7 * app.lawnchair.metro.info.InfoTiles.DAY
+        val signature = events.joinToString("|") { "${it.id}@${it.begin}" } + "#" + today
+        if (signature == shownSignature) return
+        shownSignature = signature
+        footer.visibility = GONE
+        list.removeAllViews()
+        val painter = app.lawnchair.metro.info.InfoPainter(context)
+        val shown = events.filter { it.begin < end }
+        if (shown.isEmpty()) {
+            list.addView(TextView(context).apply {
+                text = "nothing in the next 7 days"
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                setPadding(dp(16f).toInt(), dp(8f).toInt(), dp(16f).toInt(), dp(16f).toInt())
+            })
+            requestLayout()
+            return
+        }
+        var lastDay = -1L
+        for (e in shown) {
+            val day = maxOf(app.lawnchair.metro.info.InfoTiles.dayOf(e.begin), today)
+            if (day != lastDay) {
+                lastDay = day
+                val title = when ((day - today) / app.lawnchair.metro.info.InfoTiles.DAY) {
+                    0L -> "today"
+                    1L -> "tomorrow"
+                    else -> painter.dayName(day) + " " + java.util.Calendar.getInstance().apply { timeInMillis = day }.get(java.util.Calendar.DAY_OF_MONTH)
+                }
+                list.addView(TextView(context).apply {
+                    text = title
+                    setTextColor(actionTone)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                    typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+                    setPadding(dp(16f).toInt(), dp(10f).toInt(), dp(16f).toInt(), dp(2f).toInt())
+                })
+            }
+            list.addView(agendaRow(e, painter.whenText(e)))
+        }
+        requestLayout()
+    }
+
+    private fun agendaRow(e: app.lawnchair.metro.info.CalEvent, time: String): View {
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(16f).toInt(), dp(6f).toInt(), dp(16f).toInt(), dp(6f).toInt())
+            isClickable = true
+            setOnClickListener {
+                app.lawnchair.metro.info.InfoTiles.openEvent(context, e)
+                close(animate = false)
+            }
+        }
+        row.addView(View(context).apply {
+            setBackgroundColor(if (e.color != 0) ColorUtils.setAlphaComponent(e.color, 255) else actionTone)
+        }, LinearLayout.LayoutParams(dp(3f).toInt(), ViewGroup.LayoutParams.MATCH_PARENT).apply { marginEnd = dp(10f).toInt() })
+        val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(TextView(context).apply {
+            text = e.title
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        })
+        texts.addView(TextView(context).apply {
+            text = if (e.location != null) "$time · ${e.location}" else time
+            setTextColor(0xB3FFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        })
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        return row
     }
 
     private fun clearAll() {
@@ -323,7 +414,7 @@ class NotificationPanel(
     /** 0 = hidden, 1 = open. While the finger drags, the panel slides in with it. */
     fun setProgress(p: Float) {
         progress = p.coerceIn(0f, 1f)
-        sheet.translationX = -width.coerceAtLeast(resources.displayMetrics.widthPixels) * (1f - progress)
+        sheet.translationX = -dir * width.coerceAtLeast(resources.displayMetrics.widthPixels) * (1f - progress)
         sheet.alpha = 0.4f + 0.6f * progress
         invalidate()
     }
@@ -439,14 +530,14 @@ class NotificationPanel(
     private val flings = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
             val start = e1 ?: return false
-            val dx = e2.x - start.x
+            val dx = (e2.x - start.x) * dir
             if (abs(dx) < abs(e2.y - start.y) * 1.3f || abs(dx) < dp(50f)) return false
             if (dx < 0) {
                 close(animate = true) // swipe the panel back left
                 return true
             }
             if (downInSheet) return false // a card being swiped away
-            // Swipe right on another tile: move the panel there.
+            // Swipe on another tile (the opening direction): move the panel there.
             val other = callbacks.targetAt(start.x, start.y)
             if (other != null && other.pkg != target.pkg) {
                 performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
@@ -490,7 +581,7 @@ class NotificationPanel(
 
     // ---- One notification ----------------------------------------------------------------------
 
-    /** A notification card: swipe right to dismiss, tap to open. */
+    /** A notification card: swipe it away (right, or left when mirrored) to dismiss, tap to open. */
     @SuppressLint("ViewConstructor")
     private inner class Card(val sbn: StatusBarNotification) : LinearLayout(context) {
         private var startX = 0f
@@ -580,7 +671,7 @@ class NotificationPanel(
                     dragging = false
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = ev.rawX - startX
+                    val dx = (ev.rawX - startX) * dir
                     if (sbn.isClearable && dx > slop && dx > abs(ev.rawY - startY) * 1.3f) {
                         dragging = true
                         parent.requestDisallowInterceptTouchEvent(true)
@@ -602,7 +693,7 @@ class NotificationPanel(
             vt?.addMovement(event)
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX - startX
+                    val dx = (event.rawX - startX) * dir
                     if (!dragging && sbn.isClearable && dx > slop && dx > abs(event.rawY - startY) * 1.3f) {
                         dragging = true
                         parent.requestDisallowInterceptTouchEvent(true)
@@ -610,8 +701,8 @@ class NotificationPanel(
                         isPressed = false
                     }
                     if (dragging) {
-                        translationX = dx.coerceAtLeast(0f)
-                        alpha = 1f - (translationX / width).coerceIn(0f, 1f) * 0.8f
+                        translationX = dx.coerceAtLeast(0f) * dir
+                        alpha = 1f - (abs(translationX) / width).coerceIn(0f, 1f) * 0.8f
                         return true
                     }
                 }
@@ -619,8 +710,8 @@ class NotificationPanel(
                     if (dragging) {
                         dragging = false
                         vt?.computeCurrentVelocity(1000)
-                        val v = vt?.xVelocity ?: 0f
-                        if (event.actionMasked == MotionEvent.ACTION_UP && (translationX > width * 0.35f || v > dp(900f))) {
+                        val v = (vt?.xVelocity ?: 0f) * dir
+                        if (event.actionMasked == MotionEvent.ACTION_UP && (abs(translationX) > width * 0.35f || v > dp(900f))) {
                             dismissCard()
                         } else {
                             animate().translationX(0f).alpha(1f).setDuration(180).start()
@@ -636,7 +727,7 @@ class NotificationPanel(
         private fun dismissCard() {
             performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             dismissedKeys += sbn.key
-            animate().translationX(width.toFloat()).alpha(0f).setDuration(160).withEndAction {
+            animate().translationX(width * dir).alpha(0f).setDuration(160).withEndAction {
                 LiveTileData.dismiss(sbn.key)
                 list.removeView(this)
                 shownSignature = ""

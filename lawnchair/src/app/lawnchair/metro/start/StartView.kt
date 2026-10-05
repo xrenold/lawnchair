@@ -176,7 +176,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         // Remove tiles only; the grid also holds the app-list arrow.
         (0 until grid.childCount).map { grid.getChildAt(it) }.filterIsInstance<TileView>().forEach(grid::removeView)
         tiles.forEach { grid.addView(createTileView(it), grid.childCount - if (grid.footer != null) 1 else 0) }
-        applyLive(LiveTileData.snapshot)
+        // Live data arrives via the listener once attached (fields below aren't ready during init).
+        if (isAttachedToWindow) applyLive(LiveTileData.snapshot)
         invalidate()
     }
 
@@ -184,11 +185,35 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private val liveListener: (Map<String, LiveInfo>) -> Unit = { applyLive(it) }
 
+    /** Newest notification time seen per app, to spot new arrivals. */
+    private val seenTimes = HashMap<String, Long>()
+    private var livePrimed = false
+
+    /**
+     * Applies new live data. A tile flips the moment a new notification arrives for its app,
+     * rather than waiting for the scheduler, so tiles react in a lively, unsynchronised way.
+     * Ongoing content (music, downloads) turns its tile over and keeps it there.
+     */
     private fun applyLive(data: Map<String, LiveInfo>) {
+        val visible = Rect()
         for (i in 0 until grid.childCount) {
             val tv = grid.getChildAt(i) as? TileView ?: continue
-            tv.live = data[tv.tile.component.packageName]
+            val pkg = tv.tile.component.packageName
+            val info = data[pkg]
+            tv.live = info
+            if (info == null) continue
+            val onScreen = isShown && tv.getLocalVisibleRect(visible)
+            val isNew = livePrimed && info.latestTime > (seenTimes[pkg] ?: 0L)
+            when {
+                tv.isPinned && !tv.showingBack -> if (onScreen && livePrimed) tv.flip() else tv.showBackNow()
+                isNew && tv.hasBackFace && onScreen -> {
+                    tv.backDwellMs = 6000L + random.nextInt(3000)
+                    if (tv.showingBack) tv.flipRefresh() else tv.flip()
+                }
+            }
         }
+        data.forEach { (pkg, info) -> if (info.latestTime > 0) seenTimes[pkg] = info.latestTime }
+        livePrimed = true
     }
 
     private val visibleRect = Rect()
@@ -209,12 +234,16 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 .mapNotNull { grid.getChildAt(it) as? TileView }
                 .filter { it.getLocalVisibleRect(visibleRect) && visibleRect.height() > it.height / 2 }
 
-            onScreen.filter { it.showingBack && now - it.lastFlipAt > it.backDwellMs }
+            onScreen.filter { it.isPinned && !it.showingBack }.randomOrNull()?.let {
+                it.flip()
+                return
+            }
+            onScreen.filter { it.showingBack && !it.isPinned && now - it.lastFlipAt > it.backDwellMs }
                 .randomOrNull()?.let {
                     it.flip()
                     return
                 }
-            onScreen.filter { !it.showingBack && it.hasBackFace && now - it.lastFlipAt > 4000 }
+            onScreen.filter { !it.showingBack && !it.isPinned && it.hasBackFace && now - it.lastFlipAt > 4000 }
                 .randomOrNull()?.let {
                     it.backDwellMs = 5000L + random.nextInt(4000)
                     it.flip()
@@ -283,7 +312,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private fun createTileView(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
-        setOnClickListener { launchWithTurnstile(this) }
+        setOnClickListener { startApp(this) }
         setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             showTileMenu(this)

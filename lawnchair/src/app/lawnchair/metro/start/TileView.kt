@@ -104,11 +104,37 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     val hasBackFace: Boolean
         get() {
             val info = live ?: return false
+            // Album art works at every size, even on small tiles.
+            if (info.isMusic) return info.title != null && (tile.size != TileSize.SMALL || info.image != null)
             if (tile.size == TileSize.SMALL) return false
-            if (info.isMusic) return info.title != null
+            if (info.ongoing) return info.title != null
             if (!PreferenceManager.getInstance(context).metroMessagePeek.get()) return false
             return info.title != null || info.text != null
         }
+
+    /**
+     * Ongoing content (music, a download, navigation…) stays on the tile for as long as it
+     * runs instead of flipping back and forth.
+     */
+    val isPinned: Boolean get() = live?.ongoing == true && hasBackFace
+
+    /** Shows the back face at once, without animating (for off-screen tiles). */
+    fun showBackNow() {
+        if (showingBack || !hasBackFace) return
+        showingBack = true
+        lastFlipAt = System.currentTimeMillis()
+        invalidate()
+    }
+
+    // ---- Media controls (wide and large music tiles) ----
+    private val controlRects = Array(3) { RectF() }
+    private val controlPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val controlPath = android.graphics.Path()
+    private var controlGesture = -1
+
+    private val controlsShown: Boolean
+        get() = showingBack && live?.isMusic == true && live?.controller != null &&
+            (tile.size == TileSize.WIDE || tile.size == TileSize.LARGE)
 
     private val countPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
@@ -267,6 +293,11 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         val pad = dp(10f) * k
 
         val art = info.image
+        if (tile.size == TileSize.SMALL) {
+            // Small tile: just the album cover.
+            if (art != null) drawCover(canvas, art, 0f, 0f, w, h)
+            return
+        }
         val onColor: Int
         if (info.isMusic && art != null) {
             drawCover(canvas, art, 0f, 0f, w, h)
@@ -287,7 +318,9 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         drawAppIcon(canvas, pad, h - pad - footerIcon, footerIcon, onColor)
         val labelX = pad + footerIcon + dp(6f) * k
         var countW = 0f
-        if (info.count > 0 && !info.isMusic) {
+        if (controlsShown) {
+            countW = drawControls(canvas, info, w - pad, h - pad - maxOf(footerIcon, labelPaint.textSize) / 2f) + dp(8f)
+        } else if (info.count > 0 && !info.isMusic) {
             countPaint.textSize = spK(13f, 11f)
             countPaint.color = onColor
             val t = countLabel(info.count)
@@ -303,6 +336,27 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         val contentBottom = footerTop - dp(8f) * k
         val rows = ensureBackLayouts(info, (w - pad * 2).toInt())
         if (rows.isEmpty()) return
+
+        if (info.ongoing && !info.isMusic) {
+            // Download, navigation, call…: what it is, its status, and a progress bar.
+            val row = rows.first()
+            canvas.save()
+            canvas.translate(pad, contentTop)
+            row.title?.draw(canvas)
+            canvas.translate(0f, (row.title?.height ?: 0).toFloat() + dp(2f) * k)
+            row.body?.draw(canvas)
+            canvas.restore()
+            if (info.progress >= 0f) {
+                val barH = dp(4f) * k
+                val top = contentBottom - barH
+                fillPaint.color = ColorUtils.setAlphaComponent(onColor, 0x40)
+                canvas.drawRect(pad, top, w - pad, top + barH, fillPaint)
+                fillPaint.color = onColor
+                val frac = if (info.progress > 1f) 0.35f else info.progress // indeterminate: a short bar
+                canvas.drawRect(pad, top, pad + (w - pad * 2) * frac, top + barH, fillPaint)
+            }
+            return
+        }
 
         if (info.isMusic) {
             // Bottom-aligned above the footer: track title, then artist.
@@ -418,6 +472,19 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
                     null,
                 ),
             )
+        } else if (info.ongoing) {
+            headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            headPaint.textSize = spK(17f, 13f)
+            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.textSize = spK(13f, 11f)
+            bodyPaint.color = dim
+            listOf(
+                BackRow(
+                    info.title?.let { layout(it, headPaint, wInt, 2) },
+                    info.text?.let { layout(it, bodyPaint, wInt, if (tile.size == TileSize.LARGE) 4 else 2) },
+                    null,
+                ),
+            )
         } else if (!tile.size.isList) {
             val item = info.items.firstOrNull()
             headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
@@ -476,6 +543,47 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         paint.shader = null
     }
 
+    /**
+     * Previous / play-pause / next, right-aligned on the footer row. Returns the width used so
+     * the app name can stop short of it.
+     */
+    private fun drawControls(canvas: Canvas, info: LiveInfo, right: Float, cy: Float): Float {
+        val b = dp(34f) * k // touch target
+        val g = dp(16f) * k // glyph
+        for (i in 0 until 3) {
+            val cx = right - b * (2 - i) - b / 2f
+            controlRects[i].set(cx - b / 2f, cy - b / 2f, cx + b / 2f, cy + b / 2f)
+            val l = cx - g / 2f
+            val t = cy - g / 2f
+            controlPath.rewind()
+            when (i) {
+                0 -> { // previous: bar + left triangle
+                    canvas.drawRect(l, t, l + g * 0.16f, t + g, controlPaint)
+                    controlPath.moveTo(l + g, t)
+                    controlPath.lineTo(l + g * 0.2f, cy)
+                    controlPath.lineTo(l + g, t + g)
+                }
+                1 -> if (info.isPlaying) { // pause: two bars
+                    canvas.drawRect(l + g * 0.12f, t, l + g * 0.4f, t + g, controlPaint)
+                    canvas.drawRect(l + g * 0.6f, t, l + g * 0.88f, t + g, controlPaint)
+                } else { // play: right triangle
+                    controlPath.moveTo(l + g * 0.12f, t)
+                    controlPath.lineTo(l + g, cy)
+                    controlPath.lineTo(l + g * 0.12f, t + g)
+                }
+                2 -> { // next: right triangle + bar
+                    controlPath.moveTo(l, t)
+                    controlPath.lineTo(l + g * 0.8f, cy)
+                    controlPath.lineTo(l, t + g)
+                    canvas.drawRect(l + g * 0.84f, t, l + g, t + g, controlPaint)
+                }
+            }
+            controlPath.close()
+            canvas.drawPath(controlPath, controlPaint)
+        }
+        return b * 3
+    }
+
     private fun countLabel(count: Int) = if (count > 99) "99+" else count.toString()
 
     /**
@@ -484,9 +592,14 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
      * with a small settle, giving it physical weight. Runs on the render thread's view
      * properties, so it stays smooth at 120 Hz.
      */
-    fun flip() {
+    fun flip() = turn(swap = true)
+
+    /** New content arrived while showing the back: flip through to reveal it. */
+    fun flipRefresh() = turn(swap = false)
+
+    private fun turn(swap: Boolean) {
         if (flipping) return
-        if (!showingBack && !hasBackFace) return
+        if (swap && !showingBack && !hasBackFace) return
         flipping = true
         lastFlipAt = System.currentTimeMillis()
         cameraDistance = 9000f * resources.displayMetrics.density
@@ -495,7 +608,7 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         animate().rotationX(90f).setDuration(180).setInterpolator(AccelerateInterpolator(1.8f))
             .setUpdateListener { syncWindow() }
             .withEndAction {
-                showingBack = !showingBack
+                if (swap) showingBack = !showingBack
                 invalidate()
                 rotationX = -90f
                 syncWindow()
@@ -535,6 +648,28 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     // Press feedback: the tile sinks slightly, like the WP tilt effect (full 3D tilt comes later).
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // Media buttons on the back of a music tile take the touch instead of opening the app.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && controlsShown) {
+            controlGesture = controlRects.indexOfFirst { it.contains(event.x, event.y) }
+        }
+        if (controlGesture >= 0) {
+            if (event.actionMasked == MotionEvent.ACTION_UP) {
+                if (controlRects[controlGesture].contains(event.x, event.y)) {
+                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                    val info = live
+                    val controls = info?.controller?.transportControls
+                    when (controlGesture) {
+                        0 -> controls?.skipToPrevious()
+                        1 -> if (info?.isPlaying == true) controls?.pause() else controls?.play()
+                        2 -> controls?.skipToNext()
+                    }
+                }
+                controlGesture = -1
+            } else if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                controlGesture = -1
+            }
+            return true
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> animate().scaleX(0.96f).scaleY(0.96f).setDuration(90)
                 .setInterpolator(DecelerateInterpolator()).setUpdateListener { syncWindow() }.start()

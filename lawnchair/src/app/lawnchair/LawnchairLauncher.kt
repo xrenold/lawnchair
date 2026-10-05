@@ -542,11 +542,8 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun onResume() {
         super.onResume()
-        if (metroAwayInApp) {
-            metroAwayInApp = false
-            // Windows Phone return: tiles (or app list rows) swing back in.
-            if (metroAppList?.isOpen == true) metroAppList?.playReturn() else startView?.playReturn()
-        }
+        // Turnstile on return is switched off for now (StartView/AppListView.playReturn).
+        metroAwayInApp = false
         restartIfPending()
         refreshPredictionContainersFromModel()
 

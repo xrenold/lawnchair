@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.drawable.Icon
 import android.media.MediaMetadata
+import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
@@ -37,6 +38,18 @@ data class LiveInfo(
     val isMusic: Boolean = false,
     /** Newest-first messages, for wide and large tiles that show several at once. */
     val items: List<LiveItem> = emptyList(),
+    /** Post time of the newest message, so the Start screen can flip a tile when one arrives. */
+    val latestTime: Long = 0L,
+    /**
+     * Something in progress (music, a download, navigation, a call). The tile keeps showing it
+     * instead of flipping back and forth.
+     */
+    val ongoing: Boolean = false,
+    /** Progress 0..1 for downloads and uploads, -1 if none, 2 if indeterminate. */
+    val progress: Float = -1f,
+    /** Media session controls, for play/pause and skip on wide and large music tiles. */
+    val controller: MediaController? = null,
+    val isPlaying: Boolean = false,
 )
 
 /**
@@ -115,7 +128,38 @@ object LiveTileData {
                     .sortedByDescending { it.time }
                     .take(MAX_ITEMS)
                 val first = items.firstOrNull()
-                byPackage[pkg] = LiveInfo(pkg, count, first?.title, first?.text, first?.image, items = items)
+                byPackage[pkg] = LiveInfo(
+                    pkg, count, first?.title, first?.text, first?.image,
+                    items = items,
+                    latestTime = list.maxOf { it.postTime },
+                )
+            }
+
+        // Ongoing work with something to show: downloads/uploads with progress, navigation,
+        // calls, timers. It takes over the tile's back face for as long as it runs.
+        active
+            .filter { isOngoingWorth(it) }
+            .sortedByDescending { it.postTime }
+            .distinctBy { it.packageName }
+            .forEach { sbn ->
+                val e = sbn.notification.extras
+                val max = e.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
+                val value = e.getInt(Notification.EXTRA_PROGRESS, 0)
+                val indeterminate = e.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)
+                val progress = when {
+                    indeterminate -> 2f
+                    max > 0 -> (value.toFloat() / max).coerceIn(0f, 1f)
+                    else -> -1f
+                }
+                val prev = byPackage[sbn.packageName]
+                val image = runCatching { sbn.notification.getLargeIcon()?.let { loadIcon(context, it) } }.getOrNull()
+                byPackage[sbn.packageName] = (prev ?: LiveInfo(sbn.packageName)).copy(
+                    title = e.getCharSequence(Notification.EXTRA_TITLE),
+                    text = e.getCharSequence(Notification.EXTRA_TEXT) ?: e.getCharSequence(Notification.EXTRA_SUB_TEXT),
+                    image = image,
+                    ongoing = true,
+                    progress = progress,
+                )
             }
 
         // Music: the playing media session's artwork and track, replacing that app's message info.
@@ -134,7 +178,14 @@ object LiveTileData {
             val artist = meta.getText(MediaMetadata.METADATA_KEY_ARTIST)
                 ?: meta.getText(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             val pkg = controller.packageName
-            byPackage[pkg] = LiveInfo(pkg, 0, title, artist, art?.let(::scaleDown), isMusic = true)
+            // Keep the app's unread count; the music itself replaces the message content.
+            byPackage[pkg] = LiveInfo(
+                pkg, byPackage[pkg]?.count ?: 0, title, artist, art?.let(::scaleDown),
+                isMusic = true,
+                ongoing = true,
+                controller = controller,
+                isPlaying = state == PlaybackState.STATE_PLAYING,
+            )
         }
         return byPackage
     }
@@ -168,6 +219,22 @@ object LiveTileData {
         val text = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
             ?: extras.getCharSequence(Notification.EXTRA_TEXT)
         return listOf(LiveItem(title, text, picture, sbn.postTime))
+    }
+
+    /** Ongoing notifications worth a tile: progress, navigation, calls, stopwatch/timers. */
+    private fun isOngoingWorth(sbn: StatusBarNotification): Boolean {
+        if (!sbn.isOngoing) return false
+        val n = sbn.notification
+        if (n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return false // handled as music
+        if (n.extras.getCharSequence(Notification.EXTRA_TITLE) == null) return false
+        val hasProgress = n.extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0) > 0 ||
+            n.extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)
+        return hasProgress || n.category in setOf(
+            Notification.CATEGORY_PROGRESS,
+            Notification.CATEGORY_NAVIGATION,
+            Notification.CATEGORY_CALL,
+            Notification.CATEGORY_STOPWATCH,
+        )
     }
 
     /** Ignore ongoing, silent-summary and media-style notifications when counting. */

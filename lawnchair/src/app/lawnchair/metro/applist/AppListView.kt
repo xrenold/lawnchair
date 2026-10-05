@@ -402,11 +402,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private fun launch(info: AppInfo, view: View) {
         hideKeyboard()
-        turnedAway = true
-        Turnstile.out(visibleRows(), view, onFrame = { list.invalidate() }) {
-            startApp(info, view)
-            postDelayed({ if (hasWindowFocus()) playReturn() }, 1200)
-        }
+        startApp(info, view)
     }
 
     private fun startApp(info: AppInfo, view: View) {

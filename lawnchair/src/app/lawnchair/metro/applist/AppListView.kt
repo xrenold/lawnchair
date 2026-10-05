@@ -422,7 +422,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private fun panelTargetAt(x: Float, y: Float): app.lawnchair.metro.notify.NotificationPanel.Target? {
         if (!isOpen) return null
         val row = list.findChildViewUnder(x - list.left, y - list.top) as? AppRowView ?: return null
-        val appInfo = row.app ?: return null
+        val appInfo = row.appInfo ?: return null
         val pkg = appInfo.componentName?.packageName ?: return null
         if (live[pkg]?.isMusic == true || !LiveTileData.hasPanelContent(pkg)) return null
         val l = list.left + row.left
@@ -634,7 +634,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
      */
     private inner class AppRowView(context: Context) : View(context) {
         private var info: AppInfo? = null
-        val app: AppInfo? get() = info
+        val appInfo: AppInfo? get() = info
         val brandColor: Int get() = brand
         private var snippet: CharSequence? = null
         private var icon: Bitmap? = null

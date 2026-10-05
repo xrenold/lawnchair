@@ -79,6 +79,7 @@ object MetroTheme {
     @JvmStatic
     fun tileColor(context: Context, stableKey: String, overrideColor: Int): Int {
         if (Color.alpha(overrideColor) != 0) return overrideColor // brand/accent sentinels have none
+        if (overrideColor == app.lawnchair.metro.data.MetroTile.COLOR_ACCENT) return accent(context)
         return when (prefs(context).metroColorMode.get()) {
             MODE_CLASSIC -> classicAccent(context)
             MODE_MONET_TONAL -> tonal(context, stableKey)

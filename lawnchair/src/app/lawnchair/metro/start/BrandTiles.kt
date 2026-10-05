@@ -29,11 +29,10 @@ object BrandTiles {
         val views = grid.tiles.filterIsInstance<TileView>()
         val slack = (grid.resources.displayMetrics.density * 8).toInt()
         val bandRows = grid.rowsInViewport(viewportHeight).coerceAtLeast(2)
-        val pitch = grid.rowPitch.coerceAtLeast(1)
         val bandArea = grid.columns * bandRows
         val chosen = LinkedHashMap<TileView, Int>()
         val usedArea = HashMap<Int, Int>()
-        fun band(v: View) = ((v.top - grid.topPadding).coerceAtLeast(0) / pitch) / bandRows
+        fun band(v: View) = grid.cellRowOf(v).coerceAtLeast(0) / bandRows
         fun area(v: TileView) = v.tile.size.span.coerceAtMost(grid.columns) * v.tile.size.rowSpan
 
         for (v in views) {

@@ -121,6 +121,14 @@ class NotificationPanel(
     /** The notification and action being replied to. */
     private var replying: Pair<StatusBarNotification, Notification.Action>? = null
 
+    private var anim: android.animation.ValueAnimator? = null
+
+    /** Cards on screen, as "key@postTime", to skip rebuilding when nothing changed. */
+    private var shownSignature = ""
+    /** Dismissed here but possibly still reported for a moment by Android. */
+    private val dismissedKeys = HashSet<String>()
+    private var pendingRefresh = false
+
     init {
         setWillNotDraw(false)
         isClickable = true
@@ -201,14 +209,24 @@ class NotificationPanel(
     /** Rebuilds the cards from the app's current notifications; closes when none are left. */
     fun refresh() {
         if (closing) return
-        val items = LiveTileData.notificationsFor(target.pkg)
+        val items = LiveTileData.notificationsFor(target.pkg).filter { it.key !in dismissedKeys }
         if (items.isEmpty()) {
             emptied = true
             close(animate = true)
             return
         }
+        // Don't pull a card out from under the finger or the reply field; catch up afterwards.
+        if (replying != null || (0 until list.childCount).any { (list.getChildAt(it) as? Card)?.isDragging == true }) {
+            pendingRefresh = true
+            return
+        }
+        pendingRefresh = false
+        val shown = items.take(MAX_CARDS)
+        val signature = shown.joinToString("|") { "${it.key}@${it.postTime}" }
+        if (signature == shownSignature) return
+        shownSignature = signature
         list.removeAllViews()
-        items.take(MAX_CARDS).forEach { list.addView(Card(it)) }
+        shown.forEach { list.addView(Card(it)) }
         footer.visibility = if (items.any { it.isClearable }) VISIBLE else GONE
         requestLayout()
     }
@@ -319,8 +337,6 @@ class NotificationPanel(
         if (replying != null) hideKeyboard()
         if (animate) animateTo(0f) { finish() } else finish()
     }
-
-    private var anim: android.animation.ValueAnimator? = null
 
     private fun animateTo(to: Float, end: (() -> Unit)?) {
         anim?.cancel()
@@ -481,6 +497,7 @@ class NotificationPanel(
         private var startY = 0f
         private var dragging = false
         private var vt: android.view.VelocityTracker? = null
+        val isDragging: Boolean get() = dragging
 
         init {
             orientation = VERTICAL
@@ -564,7 +581,7 @@ class NotificationPanel(
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = ev.rawX - startX
-                    if (dx > slop && dx > abs(ev.rawY - startY) * 1.3f) {
+                    if (sbn.isClearable && dx > slop && dx > abs(ev.rawY - startY) * 1.3f) {
                         dragging = true
                         parent.requestDisallowInterceptTouchEvent(true)
                         return true
@@ -586,7 +603,7 @@ class NotificationPanel(
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - startX
-                    if (!dragging && dx > slop && dx > abs(event.rawY - startY) * 1.3f) {
+                    if (!dragging && sbn.isClearable && dx > slop && dx > abs(event.rawY - startY) * 1.3f) {
                         dragging = true
                         parent.requestDisallowInterceptTouchEvent(true)
                         cancelLongPress()
@@ -607,6 +624,7 @@ class NotificationPanel(
                             dismissCard()
                         } else {
                             animate().translationX(0f).alpha(1f).setDuration(180).start()
+                            if (pendingRefresh) post { refresh() }
                         }
                         return true
                     }
@@ -617,15 +635,13 @@ class NotificationPanel(
 
         private fun dismissCard() {
             performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            dismissedKeys += sbn.key
             animate().translationX(width.toFloat()).alpha(0f).setDuration(160).withEndAction {
                 LiveTileData.dismiss(sbn.key)
                 list.removeView(this)
-                if (list.childCount == 0) {
-                    emptied = true
-                    close(animate = true)
-                } else {
-                    requestLayout()
-                }
+                shownSignature = ""
+                // Fill in any notifications beyond the cards shown, or close when none are left.
+                post { refresh() }
             }.start()
         }
     }

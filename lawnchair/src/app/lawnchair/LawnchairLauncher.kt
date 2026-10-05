@@ -313,6 +313,14 @@ class LawnchairLauncher : QuickstepLauncher() {
         if (enabled) rootView?.setDisallowBackGesture(false) else onDragLayerHierarchyChanged()
     }
 
+    override fun onDragLayerHierarchyChanged() {
+        super.onDragLayerHierarchyChanged()
+        // Launcher3 turns the back gesture off again at home; keep it on while a panel is open.
+        if (startView?.isPanelOpen == true || metroAppList?.isPanelOpen == true) {
+            rootView?.setDisallowBackGesture(false)
+        }
+    }
+
     /** Puts the Start screen above the (hidden) workspace and dock, below the drawer and overview. */
     private fun addStartView() {
         addBackAnimationCallback(metroBackHandler)

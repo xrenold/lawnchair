@@ -107,6 +107,23 @@ class TileGridView(context: Context) : ViewGroup(context) {
     /** Extra space of a group gap, about half a small tile. */
     val groupGap: Int get() = (cellSize * 0.42f).toInt()
 
+    /**
+     * Height of the visible area (the scroller), set by the owner. Gaps depend on how many rows
+     * make up the first screen.
+     */
+    var viewportHeight = 0
+        set(value) {
+            if (field == value) return
+            field = value
+            requestLayout()
+        }
+
+    /** The cell row a tile sits in (from the last layout), or -1. */
+    fun cellRowOf(view: View): Int {
+        val i = tiles.indexOf(view)
+        return if (i < 0 || i * 2 + 1 >= positions.size) -1 else positions[i * 2 + 1]
+    }
+
     /** Rows before which a group gap sits. */
     private var gapRows = IntArray(0)
 
@@ -119,7 +136,7 @@ class TileGridView(context: Context) : ViewGroup(context) {
 
     /** Picks group-gap rows from where the tiles sit (see the class comment). */
     private fun computeGaps(tileViews: List<View>, usedRows: Int) {
-        val viewport = (parent as? View)?.height ?: 0
+        val viewport = viewportHeight
         if (viewport <= 0 || usedRows < 4) {
             gapRows = IntArray(0)
             return

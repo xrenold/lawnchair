@@ -139,6 +139,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         grid.footerSize = dp(46f).toInt()
         grid.footer = arrow
 
+        // Group gaps depend on how many rows fill the first screen.
+        scroller.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ -> grid.viewportHeight = bottom - top }
+
         // Brand colours depend on where tiles sit; re-check after every layout change.
         grid.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> scheduleBrands() }
 
@@ -703,7 +706,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** Which part of Start a tile sits in: top or bottom of the first screen, or below it. */
     private fun regionOf(v: View): MetroUsage.Region {
         val rows = grid.rowsInViewport(scroller.height)
-        val row = (v.top - grid.topPadding) / grid.rowPitch.coerceAtLeast(1)
+        val row = grid.cellRowOf(v).coerceAtLeast(0)
         return when {
             row >= rows -> MetroUsage.Region.BELOW
             row >= rows * 0.6 -> MetroUsage.Region.BOTTOM
@@ -794,12 +797,15 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private fun panelTargetAt(x: Float, y: Float): NotificationPanel.Target? {
         if (drag != null || panProgress > 0f) return null
         getLocationOnScreen(hostLoc)
+        grid.getLocationOnScreen(viewLoc)
+        // Layout positions, not the tiles' current transforms (a tile may be mid-flip).
+        val gx = viewLoc[0] - hostLoc[0] - grid.scrollX
+        val gy = viewLoc[1] - hostLoc[1] - grid.scrollY
         for (v in grid.tiles) {
             val tv = v as? TileView ?: continue
             if (!tv.tile.isApp) continue
-            tv.getLocationOnScreen(viewLoc)
-            val l = viewLoc[0] - hostLoc[0]
-            val t = viewLoc[1] - hostLoc[1]
+            val l = gx + tv.left
+            val t = gy + tv.top
             if (x < l || x >= l + tv.width || y < t || y >= t + tv.height) continue
             val pkg = tv.tile.component.packageName
             if ((tv.live?.count ?: 0) == 0 || !LiveTileData.hasPanelContent(pkg)) return null

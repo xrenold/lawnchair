@@ -153,6 +153,7 @@ class BackgroundPreviewActivity : Activity() {
         views.forEach { grid.addView(it) }
         grid.setOrder(views)
         grid.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> scheduleBrands() }
+        startLayer.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ -> grid.viewportHeight = bottom - top }
     }
 
     private val brandRunnable = Runnable {

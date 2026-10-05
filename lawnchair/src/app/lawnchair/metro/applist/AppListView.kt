@@ -80,7 +80,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private val layoutManager = LinearLayoutManager(launcher)
     private val adapter = Adapter()
     private val scrubber = AlphabetScrubber(launcher) { jumpTo(it) }
-    private val jumpGrid = JumpGridView(launcher) { letter ->
+    private val jumpGrid: JumpGridView = JumpGridView(launcher) { letter ->
         hideJumpGrid()
         letter?.let { jumpTo(it) }
     }
@@ -276,12 +276,14 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         return true
     }
 
-    private fun showJumpGrid() {
+    private fun showJumpGrid(): Unit {
         hideKeyboard()
         jumpGrid.show()
     }
 
-    private fun hideJumpGrid() = jumpGrid.hide()
+    private fun hideJumpGrid() {
+        jumpGrid.hide()
+    }
 
     private fun hideKeyboard() {
         search.clearFocus()

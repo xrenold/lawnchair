@@ -345,7 +345,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         val wm = launcher.getSystemService(WindowManager::class.java) ?: return
         if (!wm.isCrossWindowBlurEnabled) return
         lastBlur = radius
-        launcher.window.setBackgroundBlurRadius(radius)
+        launcher.window?.setBackgroundBlurRadius(radius)
     }
 
     private fun hideKeyboard() {

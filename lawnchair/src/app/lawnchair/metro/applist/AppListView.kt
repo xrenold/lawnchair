@@ -50,6 +50,7 @@ import app.lawnchair.LawnchairLauncher
 import app.lawnchair.metro.data.MetroTileStore
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.live.LiveTileData
+import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.start.StartView
 import app.lawnchair.metro.theme.MetroIcons
 import app.lawnchair.metro.theme.MetroTheme
@@ -91,6 +92,16 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private val search = EditText(launcher)
     private val list = RecyclerView(launcher)
+    private val scrubber = AlphabetScrubber(launcher) { jumpTo(it) }
+    private val sectionPositions = HashMap<Char, Int>()
+
+    /** Black behind the status bar, and behind the search bar at the bottom. */
+    private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
+    private val searchPanel = View(launcher).apply { setBackgroundColor(Color.BLACK) }
+
+    private val background = MetroTheme.background(launcher)
+    /** WP 8.1 window mode: each app square is a window onto the same wallpaper as Start. */
+    private val windowMode = background == MetroTheme.BG_WINDOW
     private val layoutManager = LinearLayoutManager(launcher)
     private val adapter = Adapter()
 
@@ -113,11 +124,11 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private var pan = 0f
     private var panAnim: ValueAnimator? = null
-    private var lastBlur = -1
 
     private val swipeDetector = GestureDetector(launcher, object : GestureDetector.SimpleOnGestureListener() {
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
             val start = e1 ?: return false
+            if (scrubber.visibility == VISIBLE && start.x > width - dp(40f)) return false
             val dx = e2.x - start.x
             val dy = e2.y - start.y
             if (dx > dp(60f) && abs(dx) > abs(dy) * 1.3f && vx > dp(250f)) {
@@ -129,21 +140,24 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     })
 
     init {
-        // Frosted glass: a dark tint over the blurred wallpaper (blur set on the window).
-        setBackgroundColor(0x8C000000.toInt())
+        // Same surface as Start: black in black and window modes (window mode cuts holes for
+        // the app squares), the wallpaper itself in wallpaper mode.
+        setBackgroundColor(if (background == MetroTheme.BG_WALLPAPER) 0x66000000 else Color.TRANSPARENT)
         visibility = GONE
         isClickable = true
 
         list.layoutManager = layoutManager
         list.adapter = adapter
-        list.clipToPadding = false
+        list.clipToPadding = true // rows never slide under the status bar
         list.overScrollMode = OVER_SCROLL_NEVER
         list.isVerticalScrollBarEnabled = false
         list.itemAnimator = null
-        // Rows dissolve as they pass under the status bar and the search bar.
-        list.isVerticalFadingEdgeEnabled = true
-        list.setFadingEdgeLength(dp(28f).toInt())
+        list.addItemDecoration(WindowMask())
         addView(list, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        addView(searchPanel, LayoutParams(LayoutParams.MATCH_PARENT, 0, Gravity.BOTTOM))
+        addView(statusStrip, LayoutParams(LayoutParams.MATCH_PARENT, 0, Gravity.TOP))
+        addView(scrubber, LayoutParams(dp(190f).toInt(), LayoutParams.MATCH_PARENT, Gravity.END))
 
         setupSearch()
         addView(search, LayoutParams(LayoutParams.MATCH_PARENT, searchHeight, Gravity.BOTTOM).apply {
@@ -211,7 +225,10 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     override fun setInsets(insets: Rect) {
         navInset = insets.bottom
-        list.setPadding(0, insets.top + dp(8f).toInt(), 0, 0)
+        (statusStrip.layoutParams as LayoutParams).height = insets.top
+        statusStrip.requestLayout()
+        list.setPadding(0, insets.top + dp(8f).toInt(), dp(36f).toInt(), 0)
+        scrubber.topInset = insets.top + dp(8f)
         layoutForKeyboard(relayout = true)
     }
 
@@ -229,7 +246,12 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         if (relayout) {
             val reserved = navInset + searchMargin * 2 + searchHeight + imeLift
             (list.layoutParams as LayoutParams).bottomMargin = reserved
+            (searchPanel.layoutParams as LayoutParams).height = reserved
+            scrubber.bottomInset = reserved.toFloat()
+            (scrubber.layoutParams as LayoutParams).bottomMargin = 0
             list.requestLayout()
+            searchPanel.requestLayout()
+            scrubber.invalidate()
         }
         search.requestLayout()
     }
@@ -267,6 +289,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private fun rebuildRows() {
         val query = search.text?.toString()?.trim().orEmpty()
+        sectionPositions.clear()
         rows = if (query.isNotEmpty()) {
             // Best matches (name starts with the query) closest to the search bar.
             allApps.filter { it.title?.toString()?.contains(query, ignoreCase = true) == true }
@@ -279,6 +302,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                 val s = sectionOf(app)
                 if (s != section) {
                     section = s
+                    sectionPositions[s] = out.size
                     out += Row.Header(s)
                 }
                 out += Row.App(app)
@@ -286,8 +310,15 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             out
         }
         layoutManager.stackFromEnd = query.isNotEmpty()
+        scrubber.available = sectionPositions.keys.toSet()
+        scrubber.visibility = if (query.isEmpty()) VISIBLE else GONE
         refreshList()
         if (query.isNotEmpty()) list.scrollToPosition((rows.size - 1).coerceAtLeast(0))
+    }
+
+    private fun jumpTo(letter: Char) {
+        val pos = sectionPositions[letter] ?: return
+        layoutManager.scrollToPositionWithOffset(pos, 0)
     }
 
     @SuppressLint("NotifyDataSetChanged")
@@ -327,25 +358,29 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         }
     }
 
+    /** Start and the list are one surface: the list slides in exactly as Start slides out. */
     private fun setPan(p: Float) {
         pan = p
         val w = (if (width > 0) width else resources.displayMetrics.widthPixels).toFloat()
         translationX = w * (1f - p)
         visibility = if (p <= 0f) GONE else VISIBLE
         startView?.setPanProgress(p)
-        setWindowBlur((p * MAX_BLUR_DP * resources.displayMetrics.density).roundToInt())
     }
 
-    /** Blurs the wallpaper behind the launcher window (Android 12+, if the device allows it). */
-    private fun setWindowBlur(radius: Int) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        // Window attribute updates cost a round trip, so only push meaningful changes.
-        if (lastBlur >= 0 && abs(radius - lastBlur) < 6 && radius != 0) return
-        if (radius == lastBlur) return
-        val wm = launcher.getSystemService(WindowManager::class.java) ?: return
-        if (!wm.isCrossWindowBlurEnabled) return
-        lastBlur = radius
-        launcher.window?.setBackgroundBlurRadius(radius)
+    // ---- Turnstile ------------------------------------------------------------------------
+
+    private var turnedAway = false
+
+    private fun visibleRows(): List<View> = (0 until list.childCount).map { list.getChildAt(it) }
+
+    /** Called when the launcher comes back from an app: rows swing back in. */
+    fun playReturn() {
+        if (!isOpen) return
+        turnedAway = false
+        val rows = visibleRows()
+        Turnstile.reset(rows)
+        rows.forEach { it.scaleX = 1f; it.scaleY = 1f }
+        Turnstile.into(rows) { list.invalidate() }
     }
 
     private fun hideKeyboard() {
@@ -366,6 +401,15 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     // ---- Actions ------------------------------------------------------------------------
 
     private fun launch(info: AppInfo, view: View) {
+        hideKeyboard()
+        turnedAway = true
+        Turnstile.out(visibleRows(), view, onFrame = { list.invalidate() }) {
+            startApp(info, view)
+            postDelayed({ if (hasWindowFocus()) playReturn() }, 1200)
+        }
+    }
+
+    private fun startApp(info: AppInfo, view: View) {
         val launcherApps = launcher.getSystemService(LauncherApps::class.java) ?: return
         val bounds = Rect()
         view.getGlobalVisibleRect(bounds)
@@ -449,6 +493,35 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         }
     }
 
+    /**
+     * Window mode: paints the list black except for each app's square, which becomes a window
+     * onto the wallpaper, exactly like the tiles on Start. Holes follow the rows' transforms,
+     * so they swing with the turnstile and sink when pressed.
+     */
+    private inner class WindowMask : RecyclerView.ItemDecoration() {
+        private val hole = android.graphics.Path()
+        private val tmp = android.graphics.Path()
+        private val rect = RectF()
+
+        override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+            if (!windowMode) return
+            hole.rewind()
+            for (i in 0 until parent.childCount) {
+                val child = parent.getChildAt(i) as? AppRowView ?: continue
+                child.squareRect(rect)
+                tmp.rewind()
+                tmp.addRect(rect, android.graphics.Path.Direction.CW)
+                if (!child.matrix.isIdentity) tmp.transform(child.matrix)
+                tmp.offset(child.left.toFloat(), child.top.toFloat())
+                hole.addPath(tmp)
+            }
+            val save = c.save()
+            c.clipOutPath(hole)
+            c.drawColor(Color.BLACK)
+            c.restoreToCount(save)
+        }
+    }
+
     /** 8.1 letter header: outlined accent square with the lowercase letter in its corner. */
     private inner class HeaderView(context: Context) : View(context) {
         var letter: Char = 'A'
@@ -468,7 +541,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         }
 
         override fun onDraw(canvas: Canvas) {
-            val s = dp(44f)
+            val s = dp(46f)
             val left = dp(16f)
             val top = (height - s) / 2f
             stroke.color = MetroTheme.accent(context)
@@ -533,34 +606,48 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             invalidate()
         }
 
-        override fun onDraw(canvas: Canvas) {
-            val app = info ?: return
-            val s = dp(44f)
+        /** The app's square, in this row's coordinates. */
+        fun squareRect(out: RectF) {
+            val s = dp(46f)
             val left = dp(16f)
             val top = (height - s) / 2f
-            r.set(left, top, left + s, top + s)
+            out.set(left, top, left + s, top + s)
+        }
 
-            // Brand-colour aura behind the icon, spilling softly onto the glass.
+        override fun onDraw(canvas: Canvas) {
+            val app = info ?: return
+            squareRect(r)
+            val s = r.width()
+
+            // A faint aura in the app's brand colour around its square.
             if (brand != 0) {
-                val radius = dp(72f)
+                val radius = dp(50f)
                 glow.shader = RadialGradient(
                     r.centerX(), r.centerY(), radius,
-                    intArrayOf(ColorUtils.setAlphaComponent(brand, 0x55), ColorUtils.setAlphaComponent(brand, 0x14), 0),
-                    floatArrayOf(0f, 0.55f, 1f),
+                    intArrayOf(ColorUtils.setAlphaComponent(brand, 0x2A), ColorUtils.setAlphaComponent(brand, 0x0A), 0),
+                    floatArrayOf(0f, 0.6f, 1f),
                     Shader.TileMode.CLAMP,
                 )
                 canvas.drawCircle(r.centerX(), r.centerY(), radius, glow)
             }
 
-            square.color = MetroTheme.tileColor(context, app.componentName?.flattenToShortString() ?: "", 0)
-            canvas.drawRect(r, square)
+            // Same look as a Start tile: a window onto the wallpaper (window mode), or the tile
+            // colour, solid or translucent.
+            val key = app.componentName?.flattenToShortString() ?: ""
+            val base = MetroTheme.tileColor(context, key, 0)
+            square.color = when {
+                windowMode -> ColorUtils.setAlphaComponent(base, if (MetroTheme.isTranslucent(context)) 0x55 else 0)
+                else -> MetroTheme.tileFill(context, key, 0)
+            }
+            if (Color.alpha(square.color) > 0) canvas.drawRect(r, square)
             icon?.let { bmp ->
                 val box = s * (if (mono) 0.56f else 0.5f)
                 val scale = box / maxOf(bmp.width, bmp.height)
                 val iw = bmp.width * scale
                 val ih = bmp.height * scale
                 iconRect.set(r.centerX() - iw / 2f, r.centerY() - ih / 2f, r.centerX() + iw / 2f, r.centerY() + ih / 2f)
-                iconPaint.colorFilter = if (mono) PorterDuffColorFilter(MetroTheme.onTileColor(square.color), PorterDuff.Mode.SRC_IN) else null
+                val glyph = if (windowMode || MetroTheme.isTranslucent(context)) Color.WHITE else MetroTheme.onTileColor(base)
+                iconPaint.colorFilter = if (mono) PorterDuffColorFilter(glyph, PorterDuff.Mode.SRC_IN) else null
                 canvas.drawBitmap(bmp, null, iconRect, iconPaint)
             }
 
@@ -568,7 +655,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             val avail = width - x - dp(16f)
             // The name carries a faint halo of the brand colour.
             if (brand != 0) {
-                name.setShadowLayer(dp(10f), 0f, 0f, ColorUtils.setAlphaComponent(brand, 0x8C))
+                name.setShadowLayer(dp(6f), 0f, 0f, ColorUtils.setAlphaComponent(brand, 0x50))
             } else {
                 name.clearShadowLayer()
             }
@@ -593,8 +680,10 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: MotionEvent): Boolean {
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> animate().scaleX(0.97f).scaleY(0.97f).setDuration(90).start()
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+                MotionEvent.ACTION_DOWN -> animate().scaleX(0.97f).scaleY(0.97f).setDuration(90)
+                    .setInterpolator(DecelerateInterpolator()).setUpdateListener { list.invalidate() }.start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> animate().scaleX(1f).scaleY(1f).setDuration(120)
+                    .setInterpolator(DecelerateInterpolator()).setUpdateListener { list.invalidate() }.start()
             }
             return super.onTouchEvent(event)
         }
@@ -605,6 +694,5 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     companion object {
         private const val PAN_MS = 300L
-        private const val MAX_BLUR_DP = 40f
     }
 }

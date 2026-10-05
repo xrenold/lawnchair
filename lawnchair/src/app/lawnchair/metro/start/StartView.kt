@@ -29,6 +29,7 @@ import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.MetroTileStore
 import app.lawnchair.metro.data.TileSize
 import app.lawnchair.metro.live.LiveInfo
+import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.live.LiveTileData
 import app.lawnchair.metro.theme.MetroTheme
 import app.lawnchair.preferences.PreferenceManager
@@ -61,6 +62,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private var parallax: ParallaxBackgroundView? = null
     private val grid = TileGridView(launcher)
     private val arrow = TextView(launcher)
+    /** Solid black behind the status bar: tiles never scroll underneath it. */
+    private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
 
     private val background = MetroTheme.background(launcher)
     private val windowMode = background == MetroTheme.BG_WINDOW
@@ -112,8 +115,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         scroller.addView(grid, ViewGroup.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
+        addView(statusStrip, LayoutParams(LayoutParams.MATCH_PARENT, 0, Gravity.TOP))
+
         // The app-list arrow scrolls with the tiles and only shows at the end of Start.
         setupArrow()
+        grid.footerSize = dp(34f).toInt()
         grid.footer = arrow
 
         // Pulling down past the top opens the notification shade.
@@ -124,6 +130,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     /** Status bar and gesture bar insets, delivered by Launcher's DragLayer. */
     override fun setInsets(insets: Rect) {
+        (statusStrip.layoutParams as LayoutParams).height = insets.top
+        statusStrip.requestLayout()
         grid.topPadding = insets.top
         grid.bottomInset = insets.bottom
         grid.requestLayout()
@@ -133,11 +141,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         arrow.text = "→" // →
         arrow.gravity = Gravity.CENTER
         arrow.setTextColor(Color.WHITE)
-        arrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+        arrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
         arrow.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
         arrow.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
-            setStroke(dp(2f).toInt(), Color.WHITE)
+            setStroke(dp(1.5f).toInt(), Color.WHITE)
             setColor(Color.TRANSPARENT)
         }
         arrow.contentDescription = "All apps"
@@ -226,33 +234,56 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private var panProgress = 0f
 
     /**
-     * Called while the app list slides in (0 = Start, 1 = app list). The tiles slide and fade,
-     * the background photo drifts the other way and frosts over, and with the system wallpaper
-     * the wallpaper itself is nudged sideways, as on Windows Phone.
+     * Called while the app list slides in (0 = Start, 1 = app list). Start and the list are one
+     * wide surface: the tiles slide out exactly as the list slides in, over a background that
+     * moves more slowly (photo) or not at all (system wallpaper), which gives the parallax.
      */
     fun setPanProgress(p: Float) {
         panProgress = p
-        scroller.translationX = -width * 0.3f * p
-        scroller.alpha = 1f - p
-        parallax?.let {
-            it.setPanFraction(p)
-            it.setBlur(p * dp(28f))
-        }
-        if (background == MetroTheme.BG_BLACK) {
-            // Fade the black away so the frosted wallpaper shows behind the app list.
-            setBackgroundColor(Color.argb(((1f - p) * 255).toInt(), 0, 0, 0))
-        }
+        scroller.translationX = -width * p
+        parallax?.setPanFraction(p)
         if (parallax == null) {
             runCatching {
                 android.app.WallpaperManager.getInstance(launcher)
-                    .setWallpaperOffsets(windowToken, 0.25f * p, 0.5f)
+                    .setWallpaperOffsets(windowToken, 0.5f * p, 0.5f)
             }
+        }
+    }
+
+    // ---- Turnstile ------------------------------------------------------------------------
+
+    /** Tiles currently on screen, in grid order. */
+    private fun visibleTiles(): List<TileView> = (0 until grid.childCount)
+        .mapNotNull { grid.getChildAt(it) as? TileView }
+        .filter { it.getLocalVisibleRect(visibleRect) }
+
+    private fun allTiles(): List<TileView> = (0 until grid.childCount).mapNotNull { grid.getChildAt(it) as? TileView }
+
+    /** True between launching an app and coming back, so the return plays the turnstile. */
+    private var turnedAway = false
+
+    /** Called when Start becomes visible again after an app: tiles swing back in. */
+    fun playReturn() {
+        if (!turnedAway && panProgress > 0f) return
+        turnedAway = false
+        val all = allTiles()
+        Turnstile.reset(all)
+        all.forEach { it.scaleX = 1f; it.scaleY = 1f }
+        Turnstile.into(visibleTiles()) { grid.invalidate() }
+    }
+
+    private fun launchWithTurnstile(view: TileView) {
+        turnedAway = true
+        Turnstile.out(visibleTiles(), view, onFrame = { grid.invalidate() }) {
+            startApp(view)
+            // If we're still in front (launch failed or slow), bring the tiles back.
+            postDelayed({ if (hasWindowFocus()) playReturn() }, 1200)
         }
     }
 
     private fun createTileView(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
-        setOnClickListener { launch(this) }
+        setOnClickListener { launchWithTurnstile(this) }
         setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             showTileMenu(this)
@@ -260,7 +291,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         }
     }
 
-    private fun launch(view: TileView) {
+    private fun startApp(view: TileView) {
         val launcherApps = launcher.getSystemService(LauncherApps::class.java) ?: return
         val bounds = Rect()
         view.getGlobalVisibleRect(bounds)

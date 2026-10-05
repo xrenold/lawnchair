@@ -532,8 +532,21 @@ class LawnchairLauncher : QuickstepLauncher() {
         return ActivityOptionsWrapper(options, callback)
     }
 
+    /** Set while another app is in front, so Start can play the turnstile when we return. */
+    private var metroAwayInApp = false
+
+    override fun onStop() {
+        super.onStop()
+        metroAwayInApp = true
+    }
+
     override fun onResume() {
         super.onResume()
+        if (metroAwayInApp) {
+            metroAwayInApp = false
+            // Windows Phone return: tiles (or app list rows) swing back in.
+            if (metroAppList?.isOpen == true) metroAppList?.playReturn() else startView?.playReturn()
+        }
         restartIfPending()
         refreshPredictionContainersFromModel()
 

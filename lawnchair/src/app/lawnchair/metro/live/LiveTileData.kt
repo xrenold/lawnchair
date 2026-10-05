@@ -193,6 +193,37 @@ object LiveTileData {
     private const val MAX_ITEMS = 6
 
     /**
+     * The app's notifications for the Start notification panel, newest first. Calls are left
+     * out: they need no action from Start.
+     */
+    @JvmStatic
+    fun notificationsFor(pkg: String): List<StatusBarNotification> {
+        val listener = NotificationListener.getInstanceIfConnected() ?: return emptyList()
+        val active = runCatching { listener.activeNotifications }.getOrNull() ?: return emptyList()
+        return active.filter { it.packageName == pkg && isUserFacing(it) && !isCall(it) }
+            .sortedByDescending { it.postTime }
+    }
+
+    /** True when the app has notifications the panel can show. */
+    @JvmStatic
+    fun hasPanelContent(pkg: String): Boolean {
+        val info = snapshot[pkg] ?: return false
+        return info.count > 0 && !info.isMusic && notificationsFor(pkg).isNotEmpty()
+    }
+
+    /** Dismisses a notification everywhere, including the notification shade. */
+    @JvmStatic
+    fun dismiss(key: String) {
+        runCatching { NotificationListener.getInstanceIfConnected()?.cancelNotification(key) }
+        requestRefresh()
+    }
+
+    private fun isCall(sbn: StatusBarNotification): Boolean {
+        val c = sbn.notification.category
+        return c == Notification.CATEGORY_CALL || c == "missed_call"
+    }
+
+    /**
      * Messages in a notification: each message of a chat (MessagingStyle) separately, with
      * its sender, or the notification's title and text otherwise.
      */

@@ -36,6 +36,8 @@ import app.lawnchair.metro.widgets.WidgetPicker
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.live.LiveTileData
+import app.lawnchair.metro.notify.NotificationPanel
+import app.lawnchair.metro.notify.PanelSwipe
 import app.lawnchair.metro.theme.BackgroundDim
 import app.lawnchair.metro.theme.MetroTheme
 import app.lawnchair.preferences.PreferenceManager
@@ -146,8 +148,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         reload()
     }
 
+    private val systemInsets = Rect()
+
     /** Status bar and gesture bar insets, delivered by Launcher's DragLayer. */
     override fun setInsets(insets: Rect) {
+        systemInsets.set(insets)
         (statusStrip.layoutParams as LayoutParams).height = insets.top
         statusStrip.requestLayout()
         grid.topPadding = insets.top
@@ -237,6 +242,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      * Ongoing content (music, downloads) turns its tile over and keeps it there.
      */
     private fun applyLive(data: Map<String, LiveInfo>) {
+        panel?.refresh()
         val visible = Rect()
         for (i in 0 until grid.childCount) {
             val tv = grid.getChildAt(i) as? TileView ?: continue
@@ -245,7 +251,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             val info = data[pkg]
             tv.live = info
             if (info == null) continue
-            val onScreen = isShown && tv.getLocalVisibleRect(visible)
+            val onScreen = isShown && !panelOpen && tv.getLocalVisibleRect(visible)
             val isNew = livePrimed && info.latestTime > (seenTimes[pkg] ?: 0L)
             when {
                 tv.isPinned && !tv.showingBack -> if (onScreen && livePrimed) tv.flip() else tv.showBackNow()
@@ -755,6 +761,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             lastTouchX = ev.x
             lastTouchY = ev.y
         }
+        if (drag == null && (panel == null || panelSwipe.active) && panelSwipe.onTouch(ev)) return true
+        if (panel != null && !panelSwipe.active) return super.dispatchTouchEvent(ev)
         if (drag == null && swipeDetector.onTouchEvent(ev)) {
             // Swipe handled: cancel whatever the tiles were doing with this gesture.
             val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
@@ -763,6 +771,73 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             return true
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    // ---- Notification panel (swipe right on a tile) ------------------------------------------
+
+    private var panel: NotificationPanel? = null
+    private val hostLoc = IntArray(2)
+    private val viewLoc = IntArray(2)
+
+    private val panelSwipe = PanelSwipe(this, find = { x, y -> panelTargetAt(x, y) }, create = { openPanel(it) })
+
+    val isPanelOpen: Boolean get() = panel != null
+
+    /** Closes the notification panel; returns false if none was open. */
+    fun closePanel(): Boolean {
+        val p = panel ?: return false
+        p.close(animate = true)
+        return true
+    }
+
+    /** The tile under (x, y), in this view's coordinates, if it has notifications to act on. */
+    private fun panelTargetAt(x: Float, y: Float): NotificationPanel.Target? {
+        if (drag != null || panProgress > 0f) return null
+        getLocationOnScreen(hostLoc)
+        for (v in grid.tiles) {
+            val tv = v as? TileView ?: continue
+            if (!tv.tile.isApp) continue
+            tv.getLocationOnScreen(viewLoc)
+            val l = viewLoc[0] - hostLoc[0]
+            val t = viewLoc[1] - hostLoc[1]
+            if (x < l || x >= l + tv.width || y < t || y >= t + tv.height) continue
+            val pkg = tv.tile.component.packageName
+            if ((tv.live?.count ?: 0) == 0 || !LiveTileData.hasPanelContent(pkg)) return null
+            val brand = tv.iconInfo?.brandColor ?: 0
+            return NotificationPanel.Target(pkg, tv.label, brand, Rect(l, t, l + tv.width, t + tv.height), tv)
+        }
+        return null
+    }
+
+    private fun openPanel(target: NotificationPanel.Target): NotificationPanel {
+        panel?.close(animate = false)
+        val p = NotificationPanel(launcher, target, panelCallbacks)
+        addView(p, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        panel = p
+        panelOpen = true
+        launcher.setMetroBackEnabled(true)
+        return p
+    }
+
+    private val panelCallbacks = object : NotificationPanel.Callbacks {
+        override fun onClosed(panel: NotificationPanel, emptied: Boolean) {
+            if (this@StartView.panel === panel) {
+                this@StartView.panel = null
+                panelOpen = false
+                launcher.setMetroBackEnabled(false)
+            }
+            // Last card gone: the tile goes back to its icon side.
+            val tv = panel.target.view as? TileView
+            if (emptied && tv != null && tv.showingBack && !tv.isPinned) tv.flip()
+        }
+
+        override fun targetAt(x: Float, y: Float) = panelTargetAt(x, y)
+
+        override fun switchTo(target: NotificationPanel.Target) {
+            openPanel(target).animateOpen()
+        }
+
+        override fun insets() = systemInsets
     }
 
     /** Expands the notification shade (Android lets launchers do this; no extra permission prompt). */

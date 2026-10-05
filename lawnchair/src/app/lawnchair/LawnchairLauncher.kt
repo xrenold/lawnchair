@@ -296,8 +296,26 @@ class LawnchairLauncher : QuickstepLauncher() {
         }
     }
 
+    /** Back closes an open Metro notification panel (Start or app list). */
+    private val metroBackHandler = object : com.android.launcher3.util.BackPressHandler {
+        override fun canHandleBack(): Boolean = metroAppList?.isPanelOpen == true || startView?.isPanelOpen == true
+
+        override fun onBackInvoked() {
+            if (metroAppList?.closePanel() != true) startView?.closePanel()
+        }
+    }
+
+    /**
+     * The home screen normally ignores the back gesture; while a Metro panel is open it is
+     * allowed, so back can close the panel.
+     */
+    fun setMetroBackEnabled(enabled: Boolean) {
+        if (enabled) rootView?.setDisallowBackGesture(false) else onDragLayerHierarchyChanged()
+    }
+
     /** Puts the Start screen above the (hidden) workspace and dock, below the drawer and overview. */
     private fun addStartView() {
+        addBackAnimationCallback(metroBackHandler)
         val layer = dragLayer
         val anchor = findViewById<View>(R.id.page_indicator) ?: hotseat
         val index = layer.indexOfChild(anchor).let { if (it < 0) 1 else it + 1 }

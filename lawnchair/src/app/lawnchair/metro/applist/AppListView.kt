@@ -115,6 +115,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private val liveListener: (Map<String, LiveInfo>) -> Unit = {
         live = it
         refreshList()
+        panel?.refresh()
     }
 
     private var navInset = 0
@@ -223,7 +224,10 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private fun isSearching() = search.text?.isNotBlank() == true
 
+    private val systemInsets = Rect()
+
     override fun setInsets(insets: Rect) {
+        systemInsets.set(insets)
         navInset = insets.bottom
         (statusStrip.layoutParams as LayoutParams).height = insets.top
         statusStrip.requestLayout()
@@ -338,6 +342,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     fun close(animate: Boolean) {
         if (!isOpen) return
         isOpen = false
+        panel?.close(animate = false)
         hideKeyboard()
         search.setText("")
         if (animate) {
@@ -389,6 +394,9 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Swipe right on an app with notifications opens its panel; elsewhere it closes the list.
+        if ((panel == null || panelSwipe.active) && panelSwipe.onTouch(ev)) return true
+        if (panel != null) return super.dispatchTouchEvent(ev)
         if (swipeDetector.onTouchEvent(ev)) {
             val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
             super.dispatchTouchEvent(cancel)
@@ -396,6 +404,59 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             return true
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    // ---- Notification panel -------------------------------------------------------------
+
+    private var panel: app.lawnchair.metro.notify.NotificationPanel? = null
+    private val panelSwipe = app.lawnchair.metro.notify.PanelSwipe(this, find = { x, y -> panelTargetAt(x, y) }, create = { openPanel(it) })
+
+    val isPanelOpen: Boolean get() = panel != null
+
+    fun closePanel(): Boolean {
+        val p = panel ?: return false
+        p.close(animate = true)
+        return true
+    }
+
+    private fun panelTargetAt(x: Float, y: Float): app.lawnchair.metro.notify.NotificationPanel.Target? {
+        if (!isOpen) return null
+        val row = list.findChildViewUnder(x - list.left, y - list.top) as? AppRowView ?: return null
+        val app = row.app ?: return null
+        val pkg = app.componentName?.packageName ?: return null
+        if (live[pkg]?.isMusic == true || !LiveTileData.hasPanelContent(pkg)) return null
+        val l = list.left + row.left
+        val t = list.top + row.top + row.translationY.toInt()
+        return app.lawnchair.metro.notify.NotificationPanel.Target(
+            pkg, app.title ?: pkg, row.brandColor, Rect(l, t, l + row.width, t + row.height), row,
+        )
+    }
+
+    private fun openPanel(target: app.lawnchair.metro.notify.NotificationPanel.Target): app.lawnchair.metro.notify.NotificationPanel {
+        panel?.close(animate = false)
+        hideKeyboard()
+        val p = app.lawnchair.metro.notify.NotificationPanel(launcher, target, panelCallbacks)
+        addView(p, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        panel = p
+        launcher.setMetroBackEnabled(true)
+        return p
+    }
+
+    private val panelCallbacks = object : app.lawnchair.metro.notify.NotificationPanel.Callbacks {
+        override fun onClosed(panel: app.lawnchair.metro.notify.NotificationPanel, emptied: Boolean) {
+            if (this@AppListView.panel === panel) {
+                this@AppListView.panel = null
+                launcher.setMetroBackEnabled(false)
+            }
+        }
+
+        override fun targetAt(x: Float, y: Float) = panelTargetAt(x, y)
+
+        override fun switchTo(target: app.lawnchair.metro.notify.NotificationPanel.Target) {
+            openPanel(target).animateOpen()
+        }
+
+        override fun insets(): Rect = Rect(0, systemInsets.top, 0, navInset)
     }
 
     // ---- Actions ------------------------------------------------------------------------
@@ -573,6 +634,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
      */
     private inner class AppRowView(context: Context) : View(context) {
         private var info: AppInfo? = null
+        val app: AppInfo? get() = info
+        val brandColor: Int get() = brand
         private var snippet: CharSequence? = null
         private var icon: Bitmap? = null
         private var mono = false

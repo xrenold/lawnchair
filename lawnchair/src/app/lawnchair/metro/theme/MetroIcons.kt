@@ -13,6 +13,7 @@ import android.os.Looper
 import android.os.Process
 import android.os.UserHandle
 import android.util.LruCache
+import app.lawnchair.metro.data.MetroShortcuts
 import java.util.concurrent.Executors
 
 /**
@@ -63,11 +64,11 @@ object MetroIcons {
     fun getShortcut(context: Context, pkg: String, shortcutId: String, fallbackLabel: String?, onLoaded: (Icon) -> Unit): Icon? {
         val k = "shortcut:$pkg#$shortcutId"
         cache.get(k)?.let { return it }
-        val app = context.applicationContext
+        val appCtx = context.applicationContext
         executor.execute {
             val icon = cache.get(k) ?: run {
-                val info = app.lawnchair.metro.data.MetroShortcuts.find(app, pkg, shortcutId)
-                val d = info?.let { app.lawnchair.metro.data.MetroShortcuts.icon(app, it) }
+                val info = MetroShortcuts.find(appCtx, pkg, shortcutId)
+                val d = info?.let { MetroShortcuts.icon(appCtx, it) }
                 val label = (info?.shortLabel ?: info?.longLabel)?.toString() ?: fallbackLabel ?: ""
                 Icon(runCatching { d?.let(::renderTrimmed) }.getOrNull(), false, label, 0)
             }.also { cache.put(k, it) }

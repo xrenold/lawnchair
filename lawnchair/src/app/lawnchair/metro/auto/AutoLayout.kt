@@ -256,6 +256,13 @@ object AutoLayout {
                 blocksPerRow == 2 && remaining <= 2 -> List(remaining) { Block.MEDIUM }
                 blocksPerRow >= 3 && remaining <= 2 -> List(remaining) { Block.MEDIUM }
                 else -> restPatterns[guard % restPatterns.size]
+            }.let { p ->
+                // Something that only fits small (the next-alarm tile) needs a quad somewhere.
+                if (Block.QUAD !in p && keep.any { it.key !in used && !mediumOk(it) && smallOk(it) }) {
+                    p.dropLast(1) + Block.QUAD
+                } else {
+                    p
+                }
             }
             layRow(
                 br,
@@ -420,7 +427,7 @@ object AutoLayout {
             )
         }
         val slideshowOn = app.lawnchair.preferences.PreferenceManager.getInstance(context).metroPhotoSlideshow.get() &&
-            InfoTiles.hasPermission(context, InfoTiles.permissionFor(app.lawnchair.metro.info.InfoKind.PHOTOS)!!)
+            InfoTiles.hasPhotoAccess(context)
         val alarmSoon = runCatching {
             val next = context.getSystemService(android.app.AlarmManager::class.java)?.nextAlarmClock
             next != null && next.triggerTime - System.currentTimeMillis() in 0..DAY

@@ -85,6 +85,8 @@ object InfoTiles {
 
     private val worker = Executors.newSingleThreadExecutor()
     private val locationExecutor = Executors.newSingleThreadExecutor()
+    /** Weather waits on location and the network; kept off [worker] so calendar and photos don't queue. */
+    private val weatherWorker = Executors.newSingleThreadExecutor()
     private var calendarObserving = false
     private val main = Handler(Looper.getMainLooper())
     private val listeners = mutableListOf<() -> Unit>()
@@ -291,10 +293,14 @@ object InfoTiles {
 
     // ---- Photos ------------------------------------------------------------------------------
 
+    /** Full photo access, or Android 14's "selected photos" access. */
+    fun hasPhotoAccess(context: Context): Boolean =
+        hasPermission(context, permissionFor(InfoKind.PHOTOS)!!) ||
+            (Build.VERSION.SDK_INT >= 34 && hasPermission(context, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"))
+
     fun refreshPhotos() {
         val app = appContext ?: return
-        val perm = permissionFor(InfoKind.PHOTOS)!!
-        if (!hasPermission(app, perm)) return
+        if (!hasPhotoAccess(app)) return
         worker.execute {
             photos = runCatching { queryPhotos(app) }.getOrDefault(photos)
             notifyChanged()
@@ -306,9 +312,14 @@ object InfoTiles {
         val since = System.currentTimeMillis() - 30 * DAY
         val out = ArrayList<Uri>()
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        val selection = "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+        @Suppress("DEPRECATION")
+        val (selection, folder) = if (Build.VERSION.SDK_INT >= 29) {
+            "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?" to "DCIM/Camera%"
+        } else {
+            "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.DATA} LIKE ?" to "%/DCIM/Camera/%"
+        }
         context.contentResolver.query(
-            collection, arrayOf(MediaStore.Images.Media._ID), selection, arrayOf(since.toString(), "DCIM/Camera%"),
+            collection, arrayOf(MediaStore.Images.Media._ID), selection, arrayOf(since.toString(), folder),
             "${MediaStore.Images.Media.DATE_TAKEN} DESC",
         )?.use { c ->
             while (c.moveToNext() && out.size < 60) out += ContentUris.withAppendedId(collection, c.getLong(0))
@@ -330,7 +341,7 @@ object InfoTiles {
             return
         }
         fetching = true
-        worker.execute {
+        weatherWorker.execute {
             val loc = lastLocation(app)
             val result = if (loc != null) runCatching { fetchWeather(loc.latitude, loc.longitude) }.getOrNull() else null
             main.post {
@@ -426,12 +437,19 @@ object InfoTiles {
 
     /** Last forecast we had, so the tile isn't blank offline (shown only if under 12 hours old). */
     private fun loadCachedWeather(context: Context) {
-        val c = cache(context)
-        val raw = c.getString("json", null) ?: return
-        val at = c.getLong("at", 0)
-        if (System.currentTimeMillis() - at > 12 * 3_600_000L) return
-        weather = runCatching { parseWeather(JSONObject(raw), at) }.getOrNull()
-        notifyChanged()
+        weatherWorker.execute {
+            val c = cache(context)
+            val raw = c.getString("json", null) ?: return@execute
+            val at = c.getLong("at", 0)
+            if (System.currentTimeMillis() - at > 12 * 3_600_000L) return@execute
+            val w = runCatching { parseWeather(JSONObject(raw), at) }.getOrNull() ?: return@execute
+            main.post {
+                if (weather == null) {
+                    weather = w
+                    notifyChanged()
+                }
+            }
+        }
     }
 
     /** WMO weather code to a short lowercase description. */

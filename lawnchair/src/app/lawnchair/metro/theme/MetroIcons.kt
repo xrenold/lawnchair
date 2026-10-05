@@ -71,7 +71,20 @@ object MetroIcons {
     private val main = Handler(Looper.getMainLooper())
     private const val RENDER_SIZE = 192
 
-    private fun key(cn: ComponentName, user: UserHandle) = cn.flattenToShortString() + "#" + user.hashCode()
+    /** Icon pack in use when keys are made, so switching packs never shows stale icons. */
+    @Volatile private var packKey = ""
+
+    private fun key(cn: ComponentName, user: UserHandle) = cn.flattenToShortString() + "#" + user.hashCode() + "#" + packKey
+
+    /** Call before loading icons: picks up the current icon pack setting. */
+    @JvmStatic
+    fun syncPack(context: Context) {
+        val p = app.lawnchair.preferences.PreferenceManager.getInstance(context).metroIconPack.get()
+        if (p != packKey) {
+            packKey = p
+            cache.evictAll()
+        }
+    }
 
     /** The chosen icon pack, loaded once (Lawnchair's icon pack support). */
     private fun packIcon(context: Context, target: ComponentName, user: UserHandle): Drawable? {
@@ -114,6 +127,7 @@ object MetroIcons {
         user: UserHandle = Process.myUserHandle(),
         onLoaded: (Icon) -> Unit,
     ): Icon? {
+        syncPack(context)
         val k = key(component, user)
         cache.get(k)?.let { return it }
         val app = context.applicationContext
@@ -148,6 +162,7 @@ object MetroIcons {
     /** Loads (or returns the cached) icon on the calling thread. Never call on the main thread. */
     @JvmStatic
     fun getBlocking(context: Context, component: ComponentName, user: UserHandle = Process.myUserHandle()): Icon {
+        syncPack(context)
         val k = key(component, user)
         return cache.get(k) ?: load(context.applicationContext, component, user).also { cache.put(k, it) }
     }

@@ -250,7 +250,8 @@ class NotificationPanel(
         val events = app.lawnchair.metro.info.InfoTiles.events
         val today = app.lawnchair.metro.info.InfoTiles.dayOf(System.currentTimeMillis())
         val end = today + 7 * app.lawnchair.metro.info.InfoTiles.DAY
-        val signature = events.joinToString("|") { "${it.id}@${it.begin}" } + "#" + today
+        // Includes the minute, so "in 25 min" and "now" stay current while it's open.
+        val signature = events.joinToString("|") { "${it.id}@${it.begin}" } + "#" + System.currentTimeMillis() / 60_000L
         if (signature == shownSignature) return
         shownSignature = signature
         footer.visibility = GONE

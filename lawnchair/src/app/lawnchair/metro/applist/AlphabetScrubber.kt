@@ -101,7 +101,9 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
         if (active > 0.01f && sel != null) {
             val r = dp(34f) * active
             val cx = baseX - waveReach - dp(64f)
-            val cy = touchY.coerceIn(letterTop + r, height - bottomInset - r)
+            val lo = letterTop + r
+            val hi = height - bottomInset - r
+            val cy = if (lo <= hi) touchY.coerceIn(lo, hi) else (letterTop + height - bottomInset) / 2f
             bubblePaint.color = accent
             bubblePaint.alpha = (235 * active).toInt()
             canvas.drawCircle(cx, cy, r, bubblePaint)
@@ -115,7 +117,7 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (ev.x < width - columnWidth - dp(8f) || ev.y < letterTop - dp(8f)) return false
+                if (ev.x < width - columnWidth - dp(8f) || ev.y < letterTop - dp(8f) || spacing() <= 0f) return false
                 parent?.requestDisallowInterceptTouchEvent(true)
                 animateActive(1f)
                 track(ev.y)

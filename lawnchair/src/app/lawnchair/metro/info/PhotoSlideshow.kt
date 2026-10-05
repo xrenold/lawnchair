@@ -21,8 +21,8 @@ import java.util.concurrent.Executors
  */
 class PhotoSlideshow(private val view: View) {
 
-    private val loader = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private val visible = android.graphics.Rect()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val m = Matrix()
 
@@ -64,7 +64,19 @@ class PhotoSlideshow(private val view: View) {
         val side = maxOf(view.width, view.height, 480).coerceAtMost(900)
         val resolver = view.context.contentResolver
         loader.execute {
-            val bmp = runCatching { resolver.loadThumbnail(uri, Size(side, side), null) }.getOrNull()
+            val bmp = runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    resolver.loadThumbnail(uri, Size(side, side), null)
+                } else {
+                    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    resolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+                    var sample = 1
+                    while (bounds.outWidth / (sample * 2) >= side && bounds.outHeight / (sample * 2) >= side) sample *= 2
+                    resolver.openInputStream(uri)?.use {
+                        android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                    }
+                }
+            }.getOrNull()
             main.post {
                 loading = false
                 done(bmp)
@@ -93,8 +105,14 @@ class PhotoSlideshow(private val view: View) {
         } else if (nxt == null && elapsed > SHOW_MS && uris.size > 1) {
             preloadNext()
         }
-        // About 30 frames a second is plenty for a slow drift.
-        view.postInvalidateDelayed(33)
+        // About 30 frames a second is plenty for a slow drift. Stop when there's nothing left to
+        // move (a single photo that has finished drifting) or the tile is scrolled out of view.
+        val settled = uris.size < 2 && elapsed > SHOW_MS * 1.2f
+        if (!settled && view.getLocalVisibleRect(visible)) {
+            view.postInvalidateDelayed(33)
+        } else if (!settled) {
+            view.postInvalidateDelayed(500) // check again in a moment, cheaply
+        }
         return true
     }
 
@@ -120,6 +138,8 @@ class PhotoSlideshow(private val view: View) {
     }
 
     companion object {
+        /** One loader for every slideshow. */
+        private val loader = Executors.newSingleThreadExecutor()
         private const val SHOW_MS = 7000L
         private const val FADE_MS = 900L
     }

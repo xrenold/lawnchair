@@ -265,6 +265,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val store = launcher.getSharedPreferences("metro_info", Context.MODE_PRIVATE)
         val needed = kinds.mapNotNull { InfoTiles.permissionFor(it) }
             .filter { !InfoTiles.hasPermission(launcher, it) && !store.getBoolean("asked_$it", false) }
+            .filter { it != InfoTiles.permissionFor(InfoKind.PHOTOS) || !InfoTiles.hasPhotoAccess(launcher) }
         grantedInfo = kinds.mapNotNull { InfoTiles.permissionFor(it) }.filter { InfoTiles.hasPermission(launcher, it) }.toSet()
         if (needed.isEmpty()) return
         store.edit().apply { needed.forEach { putBoolean("asked_$it", true) } }.apply()
@@ -480,7 +481,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private fun createAppTile(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
-        if (tile.isApp) infoKind = InfoTiles.kindOf(tile.component.packageName)
+        if (tile.isApp) InfoTiles.kindOf(tile.component.packageName)?.let { infoKind = it }
         infoChanged()
         onIconLoaded = { scheduleBrands() }
         setOnClickListener { startApp(this) }
@@ -504,7 +505,16 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         }
         if (view.infoKind == InfoKind.CLOCK) {
             val pi = InfoTiles.alarm?.showIntent
-            if (pi != null && runCatching { pi.send() }.isSuccess) return
+            if (pi != null) {
+                val opts = if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                        .toBundle()
+                } else {
+                    null
+                }
+                if (runCatching { pi.send(launcher, 0, null, null, null, null, opts) }.isSuccess) return
+            }
         }
         runCatching {
             val t = view.tile
@@ -844,8 +854,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         holdShown = false
         grid.tiles.forEach {
             it.rotation = 0f
-            it.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(120).setDuration(160)
-                .setUpdateListener { grid.invalidate() }.start()
+            it.postDelayed({
+                it.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(160)
+                    .setUpdateListener { grid.invalidate() }.start()
+            }, 120)
         }
         grid.invalidate()
         postDelayed({ runAutoLayout() }, 200)

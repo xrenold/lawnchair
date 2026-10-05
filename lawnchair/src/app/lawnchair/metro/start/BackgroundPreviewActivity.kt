@@ -76,6 +76,7 @@ class BackgroundPreviewActivity : Activity() {
     private var topInset = 0
     private var applying = false
     private var setWallpaper = true
+    @Volatile private var wallpaperFailed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -349,7 +350,8 @@ class BackgroundPreviewActivity : Activity() {
                     crop
                 }
                 ParallaxBackgroundView.file(this).outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-                if (setWallpaper) setHomeWallpaper(crop)
+                // The wallpaper is a bonus: if Android refuses it, the background still applies.
+                if (setWallpaper) wallpaperFailed = runCatching { setHomeWallpaper(crop) }.isFailure
             }.isSuccess
             main.post {
                 if (!ok) {
@@ -357,6 +359,7 @@ class BackgroundPreviewActivity : Activity() {
                     applying = false
                     return@post
                 }
+                if (wallpaperFailed) Toast.makeText(this, "Couldn't set the phone wallpaper", Toast.LENGTH_SHORT).show()
                 prefs.metroLegibility.set(level)
                 prefs.metroBackground.set(if (windowStyle) MetroTheme.BG_WINDOW else MetroTheme.BG_WALLPAPER)
                 prefs.metroBackgroundPhoto.set(prefs.metroBackgroundPhoto.get() + 1)
@@ -372,7 +375,11 @@ class BackgroundPreviewActivity : Activity() {
      * resolution, with the same dim Start applies. The return-home flash then matches Start.
      */
     private fun setHomeWallpaper(crop: Bitmap) {
-        val bounds = windowManager.currentWindowMetrics.bounds
+        val bounds = if (android.os.Build.VERSION.SDK_INT >= 30) {
+            windowManager.currentWindowMetrics.bounds
+        } else {
+            android.graphics.Rect(0, 0, resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+        }
         val sw = crop.width / (1 + ParallaxBackgroundView.TRAVEL_X)
         val sh = crop.height / (1 + ParallaxBackgroundView.TRAVEL_Y)
         val screenPart = Bitmap.createBitmap(crop, 0, 0, sw.toInt().coerceIn(1, crop.width), sh.toInt().coerceIn(1, crop.height))

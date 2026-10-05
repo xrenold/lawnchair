@@ -422,6 +422,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private fun panelTargetAt(x: Float, y: Float): app.lawnchair.metro.notify.NotificationPanel.Target? {
         if (!isOpen) return null
+        // The right edge belongs to the alphabet scrubber.
+        if (scrubber.visibility == VISIBLE && x > width - dp(44f)) return null
         val row = list.findChildViewUnder(x - list.left, y - list.top) as? AppRowView ?: return null
         val appInfo = row.appInfo ?: return null
         val pkg = appInfo.componentName?.packageName ?: return null

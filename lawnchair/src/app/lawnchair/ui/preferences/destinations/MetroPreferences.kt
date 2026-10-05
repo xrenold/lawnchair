@@ -70,18 +70,12 @@ fun MetroPreferenceGroups() {
             val context = LocalContext.current
             val photoVersion = prefs.metroBackgroundPhoto.getAdapter()
             val hasPhoto = photoVersion.state.value > 0 && ParallaxBackgroundView.file(context).exists()
+            // A picked photo opens a full-screen preview with your tiles over it; it's saved
+            // (cropped to what you positioned) only when you tap Apply there.
             val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
                 if (uri == null) return@rememberLauncherForActivityResult
-                val ok = runCatching {
-                    context.contentResolver.openInputStream(uri)!!.use { input ->
-                        ParallaxBackgroundView.file(context).outputStream().use { input.copyTo(it) }
-                    }
-                }.isSuccess
-                if (ok) {
-                    photoVersion.onChange(photoVersion.state.value + 1)
-                } else {
-                    Toast.makeText(context, "Couldn't use that photo", Toast.LENGTH_SHORT).show()
-                }
+                runCatching { app.lawnchair.metro.start.BackgroundPreviewActivity.start(context, uri) }
+                    .onFailure { Toast.makeText(context, "Couldn't use that photo", Toast.LENGTH_SHORT).show() }
             }
             ClickablePreference(
                 label = if (hasPhoto) "Change background photo" else "Choose background photo",
@@ -105,24 +99,6 @@ fun MetroPreferenceGroups() {
 
     ExpandAndShrink(visible = startEnabled.state.value) {
         PreferenceGroup(heading = "Tiles & colors") {
-            val style = prefs.metroTileStyle.getAdapter()
-            ListPreference(
-                adapter = style,
-                label = "Tile style",
-                entries = listOf(
-                    ListPreferenceEntry("solid") { "Solid" },
-                    ListPreferenceEntry("translucent") { "Semi-transparent" },
-                ),
-            )
-            ExpandAndShrink(visible = style.state.value == "translucent") {
-                SliderPreference(
-                    label = "Tile opacity",
-                    adapter = prefs.metroTileOpacity.getAdapter(),
-                    valueRange = 10..100,
-                    step = 5,
-                    showUnit = "%",
-                )
-            }
             SliderPreference(
                 label = "Tile icon size",
                 adapter = prefs.metroIconSize.getAdapter(),
@@ -132,12 +108,12 @@ fun MetroPreferenceGroups() {
             )
             ListPreference(
                 adapter = prefs.metroLegibility.getAdapter(),
-                label = "Text & icon legibility",
-                description = "Tint and shadows so icons and labels stay readable over busy wallpapers",
+                label = "Background dim",
+                description = "Dims bright wallpapers and photos just enough for tiles and text to stay readable. Dark backgrounds aren't dimmed.",
                 entries = listOf(
                     ListPreferenceEntry(0) { "Off" },
-                    ListPreferenceEntry(1) { "Subtle" },
-                    ListPreferenceEntry(2) { "Strong" },
+                    ListPreferenceEntry(1) { "Auto" },
+                    ListPreferenceEntry(2) { "Auto + stronger" },
                 ),
             )
             val colorMode = prefs.metroColorMode.getAdapter()

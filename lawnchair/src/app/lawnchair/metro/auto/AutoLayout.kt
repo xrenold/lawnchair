@@ -10,6 +10,8 @@ import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.MetroUsage
 import app.lawnchair.metro.data.TileSize
 import app.lawnchair.metro.live.LiveTileData
+import app.lawnchair.metro.theme.MetroIcons
+import app.lawnchair.metro.theme.MetroTheme
 import kotlin.math.max
 import kotlin.math.min
 
@@ -94,6 +96,24 @@ object AutoLayout {
         }
         fun prefers(a: App, r: MetroUsage.Region) = a.manual?.region == r && recently(a.manual?.movedAt ?: 0, 60)
 
+        // Brand-coloured tiles (see MetroIcons): spread out, and kept off the big wide slots in
+        // 8.1 window mode, where a solid block of colour would dominate the photo.
+        val windowMode = MetroTheme.background(context) == MetroTheme.BG_WINDOW
+        val brandMemo = HashMap<String, Boolean>()
+        fun isBrandTile(t: MetroTile?, component: ComponentName): Boolean {
+            if (t != null && t.kind != MetroTile.Kind.APP) return false
+            when (t?.color ?: 0) {
+                MetroTile.COLOR_BRAND -> return true
+                0 -> Unit
+                else -> return false
+            }
+            return brandMemo.getOrPut(component.packageName) {
+                runCatching { MetroIcons.getBlocking(context, component).brandTile != 0 }.getOrDefault(false)
+            }
+        }
+        fun isBrand(a: App) = a.fixed == null && isBrandTile(a.existing, a.component)
+        fun wideOk(a: App) = !(windowMode && isBrand(a))
+
         val blocksPerRow = max(1, columns / 2)
         val screenBlockRows = max(2, screenRows / 2)
         val thumbBlockRows = max(1, Math.round(screenBlockRows * 0.4).toInt())
@@ -158,7 +178,7 @@ object AutoLayout {
                 thumbPatterns[k % thumbPatterns.size],
                 mPick = { take(byTap) { okFor(it, TileSize.MEDIUM) } },
                 sPick = { take(byTap) { okFor(it, TileSize.SMALL) } },
-                wPick = { null },
+                wPick = { if (windowMode) take(byTap) { wideOk(it) && okFor(it, TileSize.WIDE) } else null },
             )
         }
 
@@ -172,6 +192,9 @@ object AutoLayout {
             )
         val hero = {
             take(liveFirst) {
+                (it.kind == Kind.MUSIC || it.kind == Kind.CHAT || it.kind == Kind.WIDGET || it.live > 2) &&
+                    wideOk(it) && okFor(it, TileSize.WIDE)
+            } ?: take(liveFirst) {
                 (it.kind == Kind.MUSIC || it.kind == Kind.CHAT || it.kind == Kind.WIDGET || it.live > 2) && okFor(it, TileSize.WIDE)
             }
         }
@@ -188,8 +211,9 @@ object AutoLayout {
 
         // ---- Below the first screen: the rest worth keeping, same rhythm ----
         // Only apps you actually use earn a place below the first screen.
+        // Apps used about as much sit by kind, so similar apps tend to land near each other.
         val keep = ranked.filter { it.key !in used && (it in forced || it.tap >= 3.0 || it.live >= 2.0) }
-            .sortedByDescending { it.score }
+            .sortedWith(compareByDescending<App> { Math.floor(it.score / 3.0) }.thenBy { it.kind.ordinal }.thenByDescending { it.score })
         val maxExtraBlockRows = screenBlockRows // about one more screen
         val restPatterns = restPatterns(blocksPerRow)
         var br = screenBlockRows
@@ -210,7 +234,8 @@ object AutoLayout {
                 // Quads take the least-used apps, so small tiles hold what you open least.
                 sPick = { keep.lastOrNull { it.key !in used && okFor(it, TileSize.SMALL) }?.also { used += it.key } },
                 wPick = {
-                    take(keep) { (it.kind != Kind.OTHER || it.live >= 2) && okFor(it, TileSize.WIDE) }
+                    take(keep) { (it.kind != Kind.OTHER || it.live >= 2) && wideOk(it) && okFor(it, TileSize.WIDE) }
+                        ?: take(keep) { wideOk(it) && okFor(it, TileSize.WIDE) }
                         ?: take(keep) { okFor(it, TileSize.WIDE) }
                 },
             )
@@ -226,6 +251,8 @@ object AutoLayout {
             tailRow += size.rowSpan
             used += a.key
         }
+
+        spreadBrands(placed, columns, screenRows) { t -> isBrandTile(t, t.component) }
 
         // Exact positions -> order: sorting by top-left cell (row, then column) makes the grid's
         // first-fit packing reproduce this layout precisely.
@@ -283,6 +310,61 @@ object AutoLayout {
     }
 
     // ---- Signals ----------------------------------------------------------------------------
+
+    /**
+     * Swaps tiles so brand-coloured ones never sit side by side and there are at most two in a
+     * row of blocks. Only tiles of the same size within the same screen swap, so the layout's
+     * shape and the usage order stay as they were.
+     */
+    private fun spreadBrands(
+        placed: MutableList<Pair<MetroTile, Pair<Int, Int>>>,
+        columns: Int,
+        screenRows: Int,
+        isBrand: (MetroTile) -> Boolean,
+    ) {
+        if (placed.isEmpty()) return
+        val order = placed.indices.sortedWith(compareBy({ placed[it].second.second }, { placed[it].second.first }))
+        val brand = BooleanArray(placed.size) { isBrand(placed[it].first) }
+        fun rectOf(i: Int): IntArray {
+            val (c, r) = placed[i].second
+            val sz = placed[i].first.size
+            return intArrayOf(c, r, c + sz.span.coerceAtMost(columns), r + sz.rowSpan)
+        }
+        fun touching(a: Int, b: Int): Boolean {
+            val x = rectOf(a)
+            val y = rectOf(b)
+            return x[0] <= y[2] && y[0] <= x[2] && x[1] <= y[3] && y[1] <= x[3]
+        }
+        fun violates(i: Int, settled: List<Int>): Boolean {
+            if (settled.any { touching(i, it) }) return true
+            val blockRow = placed[i].second.second / 2
+            return settled.count { placed[it].second.second / 2 == blockRow } >= 2
+        }
+        fun screenOf(i: Int) = placed[i].second.second / screenRows.coerceAtLeast(1)
+        val settled = ArrayList<Int>()
+        for ((k, i) in order.withIndex()) {
+            if (!brand[i]) continue
+            if (!violates(i, settled)) {
+                settled += i
+                continue
+            }
+            // Find a later, same-size, plain tile on the same screen whose spot works.
+            val swapWith = order.drop(k + 1).firstOrNull { j ->
+                !brand[j] && placed[j].first.size == placed[i].first.size && screenOf(j) == screenOf(i) &&
+                    !violates(j, settled)
+            }
+            if (swapWith == null) {
+                settled += i // nothing better; Start's quarter cap and neighbour rule still apply
+                continue
+            }
+            val ti = placed[i].first
+            val tj = placed[swapWith].first
+            placed[i] = tj to placed[i].second
+            placed[swapWith] = ti to placed[swapWith].second
+            brand[i] = false
+            brand[swapWith] = true
+        }
+    }
 
     private fun gatherApps(context: Context, current: List<MetroTile>): List<App> {
         val launcherApps = context.getSystemService(LauncherApps::class.java)

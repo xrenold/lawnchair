@@ -141,8 +141,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     init {
         // Same surface as Start: black in black and window modes (window mode cuts holes for
-        // the app squares), the wallpaper itself in wallpaper mode.
-        setBackgroundColor(if (background == MetroTheme.BG_WALLPAPER) 0x66000000 else Color.TRANSPARENT)
+        // the app squares), the dimmed wallpaper itself in wallpaper mode.
+        setBackgroundColor(Color.TRANSPARENT) // Start's background dim (behind) keeps the list readable
         visibility = GONE
         isClickable = true
 
@@ -651,10 +651,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             // colour, solid or translucent.
             val key = app.componentName?.flattenToShortString() ?: ""
             val base = MetroTheme.tileColor(context, key, 0)
-            square.color = when {
-                windowMode -> ColorUtils.setAlphaComponent(base, if (MetroTheme.isTranslucent(context)) 0x55 else 0)
-                else -> MetroTheme.tileFill(context, key, 0)
-            }
+            square.color = if (windowMode) 0 else base
             if (Color.alpha(square.color) > 0) canvas.drawRect(r, square)
             icon?.let { bmp ->
                 val box = s * (if (mono) 0.56f else 0.5f)
@@ -662,7 +659,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                 val iw = bmp.width * scale
                 val ih = bmp.height * scale
                 iconRect.set(r.centerX() - iw / 2f, r.centerY() - ih / 2f, r.centerX() + iw / 2f, r.centerY() + ih / 2f)
-                val glyph = if (windowMode || MetroTheme.isTranslucent(context)) Color.WHITE else MetroTheme.onTileColor(base)
+                val glyph = if (windowMode) Color.WHITE else MetroTheme.onTileColor(base)
                 iconPaint.colorFilter = if (mono) PorterDuffColorFilter(glyph, PorterDuff.Mode.SRC_IN) else null
                 canvas.drawBitmap(bmp, null, iconRect, iconPaint)
             }

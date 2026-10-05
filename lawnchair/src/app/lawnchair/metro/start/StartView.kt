@@ -36,6 +36,7 @@ import app.lawnchair.metro.widgets.WidgetPicker
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.live.LiveTileData
+import app.lawnchair.metro.theme.BackgroundDim
 import app.lawnchair.metro.theme.MetroTheme
 import app.lawnchair.preferences.PreferenceManager
 import com.android.launcher3.Insettable
@@ -67,6 +68,12 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private var parallax: ParallaxBackgroundView? = null
     private val grid = TileGridView(launcher)
     private val arrow = ArrowButton(launcher, onTap = { openAppList() }, onHoldComplete = { runAutoLayout() })
+    /**
+     * Legibility: an even black layer over the background (photo or wallpaper), stronger the
+     * brighter the background. It sits behind the tiles and doesn't move with them, so it also
+     * covers the app list when that slides in.
+     */
+    private val dimView = View(launcher).apply { setBackgroundColor(Color.BLACK); alpha = 0f }
     /** Solid black behind the status bar: tiles never scroll underneath it. */
     private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
 
@@ -117,6 +124,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 scroller.onScrollFraction = { bg.setScrollFraction(it) }
             }
         }
+        if (background != MetroTheme.BG_BLACK) {
+            addView(dimView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            updateDim()
+        }
         scroller.addView(grid, ViewGroup.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
@@ -125,6 +136,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         // The app-list arrow scrolls with the tiles and only shows at the end of Start.
         grid.footerSize = dp(46f).toInt()
         grid.footer = arrow
+
+        // Brand colours depend on where tiles sit; re-check after every layout change.
+        grid.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> scheduleBrands() }
 
         // Pulling down past the top opens the notification shade.
         scroller.onPullPastTop = { openNotifications() }
@@ -236,7 +250,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             when {
                 tv.isPinned && !tv.showingBack -> if (onScreen && livePrimed) tv.flip() else tv.showBackNow()
                 isNew && tv.hasBackFace && onScreen -> {
-                    tv.backDwellMs = 6000L + random.nextInt(3000)
+                    tv.pickBackDwell(random)
                     if (tv.showingBack) tv.flipRefresh() else tv.flip()
                 }
             }
@@ -249,39 +263,84 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private val random = java.util.Random()
 
     /**
-     * Flip scheduler. Every couple of seconds, at most one on-screen tile flips: one that has
-     * shown its content long enough goes back to its icon, otherwise a random live tile that
-     * hasn't flipped for a while turns over. Tiles never flip in sync, as on Windows Phone, and
-     * nothing animates while Start is hidden.
+     * Flip scheduler. Every second or so, at most one on-screen tile flips: one that has shown
+     * its content long enough goes back to its icon, otherwise a live tile that has shown its
+     * icon long enough (3–4s) turns over. At most two tiles are ever mid-flip, and never two
+     * neighbours, so Start stays calm and tiles never flip in sync, as on Windows Phone.
+     * Nothing animates while Start is hidden.
      */
     private val liveTicker = object : Runnable {
         override fun run() {
-            postDelayed(this, LIVE_TICK_MS + random.nextInt(900))
-            if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus()) return
+            postDelayed(this, LIVE_TICK_MS + random.nextInt(600))
+            if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() || panelOpen) return
             val now = System.currentTimeMillis()
             val onScreen = (0 until grid.childCount)
                 .mapNotNull { grid.getChildAt(it) as? TileView }
                 .filter { it.getLocalVisibleRect(visibleRect) && visibleRect.height() > it.height / 2 }
+            val busy = onScreen.filter { it.isFlipping }
+            if (busy.size >= 2) return
+            val free = onScreen.filter { t -> !t.isFlipping && busy.none { b -> touches(t, b) } }
 
-            onScreen.filter { it.isPinned && !it.showingBack }.randomOrNull()?.let {
+            free.filter { it.isPinned && !it.showingBack }.randomOrNull()?.let {
                 it.flip()
                 return
             }
-            onScreen.filter { it.showingBack && !it.isPinned && now - it.lastFlipAt > it.backDwellMs }
+            free.filter { it.showingBack && !it.isPinned && now - it.lastFlipAt > it.backDwellMs }
                 .randomOrNull()?.let {
+                    it.frontDwellMs = 3000L + random.nextInt(1000)
                     it.flip()
                     return
                 }
-            onScreen.filter { !it.showingBack && !it.isPinned && it.hasBackFace && now - it.lastFlipAt > 4000 }
+            free.filter { !it.showingBack && !it.isPinned && it.hasBackFace && now - it.lastFlipAt > it.frontDwellMs }
                 .randomOrNull()?.let {
-                    it.backDwellMs = 5000L + random.nextInt(4000)
+                    it.pickBackDwell(random)
                     it.flip()
                 }
         }
     }
 
+    private val touchA = Rect()
+    private val touchB = Rect()
+
+    /** True when two tiles share an edge or corner (or overlap). */
+    private fun touches(a: View, b: View): Boolean {
+        val slack = dp(8f).toInt()
+        touchA.set(a.left - slack, a.top - slack, a.right + slack, a.bottom + slack)
+        touchB.set(b.left, b.top, b.right, b.bottom)
+        return Rect.intersects(touchA, touchB)
+    }
+
+    // ---- Brand-coloured tiles -----------------------------------------------------------
+
+    private val brandRunnable = Runnable { assignBrands() }
+
+    private fun scheduleBrands() {
+        removeCallbacks(brandRunnable)
+        postDelayed(brandRunnable, 120)
+    }
+
+    /** Brand colours depend on where tiles sit (see BrandTiles). */
+    private fun assignBrands() {
+        if (drag != null) return
+        if (BrandTiles.assign(grid, scroller.height) && windowMode) grid.invalidate()
+    }
+
+    /** Measures the background's brightness and sets the dim to match. */
+    private fun updateDim() {
+        if (background == MetroTheme.BG_BLACK) return
+        val level = prefs.metroLegibility.get()
+        if (level == 0) {
+            dimView.alpha = 0f
+            return
+        }
+        BackgroundDim.measure(launcher, parallax?.image) { lum ->
+            dimView.animate().alpha(BackgroundDim.dimFor(lum, level)).setDuration(250).start()
+        }
+    }
+
     /** Repaints every tile, e.g. after the Monet palette changed. */
     fun refreshColors() {
+        updateDim()
         for (i in 0 until grid.childCount) (grid.getChildAt(i) as? TileView)?.refreshColors()
         arrow.invalidate()
         invalidate()
@@ -290,6 +349,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     fun scrollToTop() = scroller.smoothScrollTo(0, 0)
 
     private var panProgress = 0f
+
+    /** True while a notification panel is open over Start: tiles hold still. */
+    private var panelOpen = false
 
     /**
      * Called while the app list slides in (0 = Start, 1 = app list). Start and the list are one
@@ -349,6 +411,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private fun createAppTile(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
+        onIconLoaded = { scheduleBrands() }
         setOnClickListener { startApp(this) }
         // Long-press picks the tile up: drag to move it, or let go in place for its menu.
         setOnLongClickListener {
@@ -389,9 +452,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
         if (!isWidget) {
             val colors = menu.menu.addSubMenu(Menu.NONE, MENU_COLOR, 1, "Tile color")
-            colors.add(GROUP_COLOR, 0, 0, "Theme (automatic)")
+            colors.add(GROUP_COLOR, 0, 0, "Automatic")
+            colors.add(GROUP_COLOR, 1, 1, "Brand color")
+            colors.add(GROUP_COLOR, 2, 2, "Accent color")
             MetroTheme.CLASSIC_ACCENTS.keys.forEachIndexed { i, name ->
-                colors.add(GROUP_COLOR, i + 1, i + 1, name.replaceFirstChar { it.uppercase() })
+                colors.add(GROUP_COLOR, i + 3, i + 3, name.replaceFirstChar { it.uppercase() })
             }
         }
         menu.menu.add(Menu.NONE, MENU_LOCK, 2, if (tile.locked) "Unlock tile" else "Lock tile (auto layout keeps it)")
@@ -410,8 +475,14 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     store.save(tiles)
                 }
                 item.groupId == GROUP_COLOR -> {
-                    tile.color = if (item.itemId == 0) 0 else MetroTheme.CLASSIC_ACCENTS.values.elementAt(item.itemId - 1)
+                    tile.color = when (item.itemId) {
+                        0 -> 0
+                        1 -> MetroTile.COLOR_BRAND
+                        2 -> MetroTile.COLOR_ACCENT
+                        else -> MetroTheme.CLASSIC_ACCENTS.values.elementAt(item.itemId - 3)
+                    }
                     commit(view)
+                    scheduleBrands()
                 }
                 item.itemId == MENU_UNPIN -> {
                     tiles.removeAll { it.id == tile.id }
@@ -713,6 +784,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_LOCK = 104
         private const val GROUP_SIZE = 1
         private const val GROUP_COLOR = 2
-        private const val LIVE_TICK_MS = 2200L
+        private const val LIVE_TICK_MS = 1100L
     }
 }

@@ -84,6 +84,13 @@
         </activity>
 
         <activity
+            android:name="app.lawnchair.metro.start.BackgroundPreviewActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <activity
             android:label="@string/lawnchair_actions"
             android:icon="@mipmap/ic_launcher_home"
             android:name="app.lawnchair.gestures.ui.LawnchairShortcutActivity"

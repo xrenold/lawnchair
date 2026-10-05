@@ -32,7 +32,10 @@ data class MetroTile(
     /** The app's activity; for widgets, the widget provider; for shortcuts, the owning app. */
     val component: ComponentName,
     var size: TileSize = TileSize.MEDIUM,
-    /** Per-tile colour override, 0 = follow the theme. */
+    /**
+     * Per-tile colour override: 0 = automatic (theme, or brand colour when the app qualifies),
+     * [COLOR_BRAND] or [COLOR_ACCENT] to force either, or a specific colour.
+     */
     var color: Int = 0,
     /** Locked tiles keep their size and spot when auto layout runs. */
     var locked: Boolean = false,
@@ -67,6 +70,10 @@ data class MetroTile(
         .put("title", title ?: "")
 
     companion object {
+        /** Sentinels for [color]; real colours always have a non-zero alpha. */
+        const val COLOR_BRAND = 1
+        const val COLOR_ACCENT = 2
+
         fun fromJson(o: JSONObject): MetroTile? {
             val cn = ComponentName.unflattenFromString(o.optString("component")) ?: return null
             val size = runCatching { TileSize.valueOf(o.optString("size")) }.getOrDefault(TileSize.MEDIUM)

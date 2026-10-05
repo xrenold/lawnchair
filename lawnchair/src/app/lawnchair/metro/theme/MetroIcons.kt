@@ -27,9 +27,24 @@ object MetroIcons {
 
     /**
      * [brandColor] is the most prominent saturated colour of the app's full-colour icon
-     * (WhatsApp green, Spotify green, X blue…), or 0 when the icon has no clear colour.
+     * (WhatsApp green, Spotify green, X blue…), lifted for glows, or 0 when the icon has no
+     * clear colour.
+     *
+     * [brandTile] is the colour for a brand-coloured tile, or 0 when the app doesn't qualify:
+     * apps that came with the phone keep the accent, as Windows Phone's built-in apps did, and
+     * only icons with one clearly dominant colour qualify (not multicolour icons like Chrome,
+     * nor white or black ones like X). The colour is toned down slightly and darkened as needed
+     * so white text stays readable on it. [brandStrength] (0..1) says how clearly the colour
+     * dominates, for choosing between candidates.
      */
-    class Icon(val bitmap: Bitmap?, val monochrome: Boolean, val label: CharSequence, val brandColor: Int)
+    class Icon(
+        val bitmap: Bitmap?,
+        val monochrome: Boolean,
+        val label: CharSequence,
+        val brandColor: Int,
+        val brandTile: Int = 0,
+        val brandStrength: Float = 0f,
+    )
 
     private val cache = LruCache<String, Icon>(400)
     private val executor = Executors.newFixedThreadPool(2)
@@ -77,6 +92,13 @@ object MetroIcons {
         return null
     }
 
+    /** Loads (or returns the cached) icon on the calling thread. Never call on the main thread. */
+    @JvmStatic
+    fun getBlocking(context: Context, component: ComponentName, user: UserHandle = Process.myUserHandle()): Icon {
+        val k = key(component, user)
+        return cache.get(k) ?: load(context.applicationContext, component, user).also { cache.put(k, it) }
+    }
+
     /** Drops cached icons, e.g. after an app update or theme change. */
     @JvmStatic
     fun clear() = cache.evictAll()
@@ -95,15 +117,23 @@ object MetroIcons {
         }
         val label = runCatching { info?.label }.getOrNull() ?: target.packageName
         val bitmap = runCatching { (mono ?: full)?.let(::renderTrimmed) }.getOrNull()
-        val brand = runCatching { full?.let(::brandColorOf) }.getOrNull() ?: 0
-        return Icon(bitmap, mono != null, label, brand)
+        val brand = runCatching { full?.let(::brandOf) }.getOrNull()
+        val appInfo = runCatching { info?.applicationInfo }.getOrNull()
+        val preinstalled = appInfo != null && appInfo.flags and
+            (android.content.pm.ApplicationInfo.FLAG_SYSTEM or android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        val tile = if (brand != null && !preinstalled && brand.strength >= 0.62f) brand.tile else 0
+        return Icon(bitmap, mono != null, label, brand?.glow ?: 0, tile, if (tile != 0) brand!!.strength else 0f)
     }
 
+    private class Brand(val glow: Int, val tile: Int, val strength: Float)
+
     /**
-     * Finds the icon's brand colour: bucket saturated pixels by hue, take the strongest bucket,
-     * average its colour and lift it to a bright, glow-friendly tone.
+     * Finds the icon's brand colour: bucket saturated pixels by hue and take the strongest
+     * bucket (with its neighbours, so a gradient within one hue still counts as one colour).
+     * Strength is how much of the icon's colour that hue holds, scaled down when the icon is
+     * mostly white, grey or black.
      */
-    private fun brandColorOf(d: Drawable): Int {
+    private fun brandOf(d: Drawable): Brand? {
         val size = 48
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         d.setBounds(0, 0, size, size)
@@ -116,10 +146,14 @@ object MetroIcons {
         val sumG = FloatArray(buckets)
         val sumB = FloatArray(buckets)
         val hsv = FloatArray(3)
+        var opaque = 0
+        var colored = 0
         for (c in px) {
             if ((c ushr 24) < 200) continue
+            opaque++
             android.graphics.Color.colorToHSV(c, hsv)
             if (hsv[1] < 0.35f || hsv[2] < 0.25f) continue // greys, whites, blacks
+            colored++
             val b = ((hsv[0] / 360f) * buckets).toInt().coerceIn(0, buckets - 1)
             val w = hsv[1] * hsv[2]
             weight[b] += w
@@ -127,17 +161,37 @@ object MetroIcons {
             sumG[b] += ((c shr 8) and 0xFF) * w
             sumB[b] += (c and 0xFF) * w
         }
-        val best = weight.indices.maxByOrNull { weight[it] } ?: return 0
-        if (weight[best] < 20f) return 0 // too little colour to call it a brand colour
+        val best = weight.indices.maxByOrNull { weight[it] } ?: return null
+        if (weight[best] < 20f) return null // too little colour to call it a brand colour
+        val total = weight.sum()
+        val near = weight[best] + weight[(best + 1) % buckets] + weight[(best + buckets - 1) % buckets]
+        val coverage = if (opaque == 0) 0f else colored.toFloat() / opaque
+        // One hue must hold most of the colour, and colour must cover a fair part of the icon.
+        val strength = (near / total) * (coverage / 0.35f).coerceAtMost(1f)
         val avg = android.graphics.Color.rgb(
             (sumR[best] / weight[best]).toInt(),
             (sumG[best] / weight[best]).toInt(),
             (sumB[best] / weight[best]).toInt(),
         )
         android.graphics.Color.colorToHSV(avg, hsv)
-        hsv[1] = hsv[1].coerceAtLeast(0.6f)
-        hsv[2] = hsv[2].coerceAtLeast(0.85f)
-        return android.graphics.Color.HSVToColor(hsv)
+        val glowHsv = hsv.copyOf()
+        glowHsv[1] = glowHsv[1].coerceAtLeast(0.6f)
+        glowHsv[2] = glowHsv[2].coerceAtLeast(0.85f)
+        return Brand(android.graphics.Color.HSVToColor(glowHsv), tileTone(hsv), strength)
+    }
+
+    /** Brand colour toned down a touch for a tile, and dark enough for white text. */
+    private fun tileTone(hsv: FloatArray): Int {
+        val t = hsv.copyOf()
+        t[1] = (t[1] * 0.88f).coerceIn(0.35f, 0.9f)
+        t[2] = t[2].coerceAtMost(0.80f)
+        var c = android.graphics.Color.HSVToColor(t)
+        var guard = 0
+        while (androidx.core.graphics.ColorUtils.calculateContrast(android.graphics.Color.WHITE, c) < 3.2 && guard++ < 20) {
+            t[2] *= 0.94f
+            c = android.graphics.Color.HSVToColor(t)
+        }
+        return c
     }
 
     /** Draws [d] into a bitmap and crops away transparent padding, leaving only the artwork. */

@@ -82,10 +82,6 @@ class PreferenceManager @Inject constructor(
     val metroTiles = BoolPref("pref_metroTiles", true, recreate)
     /** "Show more tiles": 6 small-tile columns instead of 4. */
     val metroShowMoreTiles = BoolPref("pref_metroShowMoreTiles", false, recreate)
-    /** "solid" or "translucent". */
-    val metroTileStyle = StringPref("pref_metroTileStyle", "solid", recreate)
-    /** Tile opacity in percent when [metroTileStyle] is translucent. */
-    val metroTileOpacity = IntPref("pref_metroTileOpacity", 60, recreate)
     /** "black", "wallpaper" or "window" (black with wallpaper visible through tiles). */
     val metroBackground = StringPref("pref_metroBackground", "black", recreate)
     /** "monet" (single accent), "monet_tonal" (mixed Monet tones) or "classic". */
@@ -98,7 +94,7 @@ class PreferenceManager @Inject constructor(
     val metroBackgroundPhoto = IntPref("pref_metroBackgroundPhoto", 0, recreate)
     /** Live tiles flip to show content. */
     val metroLiveTiles = BoolPref("pref_metroLiveTiles", true, recreate)
-    /** Keeps icons and text readable over busy wallpapers: 0 off, 1 subtle, 2 strong. */
+    /** Background dim for legibility: 0 off, 1 auto, 2 auto + stronger. */
     val metroLegibility = IntPref("pref_metroLegibility", 1, recreate)
     /** Live tiles may show message text from notifications. */
     val metroMessagePeek = BoolPref("pref_metroMessagePeek", true)

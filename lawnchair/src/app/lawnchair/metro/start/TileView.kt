@@ -97,6 +97,9 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     /** How long the back face should stay before flipping home again. */
     var backDwellMs = 7000L
 
+    /** How long the icon side stays before the tile may turn over again. */
+    var frontDwellMs = 3500L
+
     private var flipping = false
     private var flipSpring: SpringAnimation? = null
 
@@ -194,10 +197,12 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             if (tile.component == target) {
                 iconIsMonochrome = loaded.monochrome
                 icon = loaded.bitmap
+                iconInfo = loaded
                 label = loaded.label
                 contentDescription = loaded.label
                 backLayouts = null
                 invalidate()
+                onIconLoaded?.invoke()
             }
         }
         if (tile.kind == MetroTile.Kind.SHORTCUT) {
@@ -232,59 +237,53 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     }
 
     /**
-     * Legibility level where the wallpaper shows through the tile (window mode or translucent
-     * tiles): 0 off, 1 subtle, 2 strong. Solid tiles don't need it.
+     * Legibility is handled by dimming the background behind Start (see BackgroundDim). Only
+     * "Auto + stronger" adds a barely-there shadow, for the brightest photos, and only where
+     * the wallpaper shows through the tile.
      */
-    private fun legibility(): Int =
-        if (windowMode || MetroTheme.isTranslucent(context)) PreferenceManager.getInstance(context).metroLegibility.get() else 0
-
-    /** Shadows that lift white glyphs and text off bright wallpaper. */
-    private fun applyShadows() {
-        val l = legibility()
-        if (l == 0) {
+    private fun applyShadows(onPhoto: Boolean) {
+        if (!onPhoto || PreferenceManager.getInstance(context).metroLegibility.get() < 2) {
             iconPaint.clearShadowLayer()
             labelPaint.clearShadowLayer()
             countPaint.clearShadowLayer()
             return
         }
-        val c = if (l == 1) 0x66000000.toInt() else 0x99000000.toInt()
-        iconPaint.setShadowLayer(dp(if (l == 1) 3f else 5f), 0f, dp(1f), c)
-        labelPaint.setShadowLayer(dp(if (l == 1) 2f else 3f), 0f, dp(1f), c)
-        countPaint.setShadowLayer(dp(if (l == 1) 2f else 3f), 0f, dp(1f), c)
+        val c = 0x40000000
+        iconPaint.setShadowLayer(dp(2f), 0f, dp(0.5f), c)
+        labelPaint.setShadowLayer(dp(1.5f), 0f, dp(0.5f), c)
+        countPaint.setShadowLayer(dp(1.5f), 0f, dp(0.5f), c)
     }
 
-    private fun drawFill(canvas: Canvas, readingText: Boolean = false): Int {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val base = MetroTheme.tileColor(context, tile.key, tile.color)
-        val fill = if (windowMode) {
-            ColorUtils.setAlphaComponent(base, if (MetroTheme.isTranslucent(context)) 0x55 else 0x00)
-        } else {
-            MetroTheme.tileFill(context, tile.key, tile.color)
+    /**
+     * Brand colour for this tile, chosen by Start (0 = use the theme colour). Brand tiles stay
+     * solid even in window mode, as third-party tiles with their own colour did on 8.1.
+     */
+    var brandColor = 0
+        set(value) {
+            if (field == value) return
+            field = value
+            backLayouts = null
+            invalidate()
         }
-        if (Color.alpha(fill) > 0) {
-            fillPaint.color = fill
-            canvas.drawRect(0f, 0f, w, h, fillPaint)
+
+    /** Called when the icon (and so the brand colour) has loaded. */
+    var onIconLoaded: (() -> Unit)? = null
+
+    /** The app's icon colour info, for brand tiles and the notification panel. */
+    var iconInfo: MetroIcons.Icon? = null
+        private set
+
+    /** True when this tile is drawn as a window onto the wallpaper (no fill). */
+    private val isWindow: Boolean get() = windowMode && brandColor == 0
+
+    private fun drawFill(canvas: Canvas): Int {
+        val base = if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tile.color)
+        if (!isWindow) {
+            fillPaint.color = base
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fillPaint)
         }
-        val l = legibility()
-        if (l > 0) {
-            // A light overall tint, darker behind text (the label row, or the whole tile when it
-            // shows messages), so white text reads on any wallpaper.
-            val base = when {
-                readingText -> if (l == 1) 0x40 else 0x66
-                else -> if (l == 1) 0x0D else 0x1F
-            }
-            fillPaint.color = ColorUtils.setAlphaComponent(Color.BLACK, base)
-            canvas.drawRect(0f, 0f, w, h, fillPaint)
-            if (!readingText) {
-                val bottom = if (l == 1) 0x40 else 0x73
-                scrimPaint.shader = LinearGradient(0f, h * 0.55f, 0f, h, 0, ColorUtils.setAlphaComponent(Color.BLACK, bottom), Shader.TileMode.CLAMP)
-                canvas.drawRect(0f, h * 0.55f, w, h, scrimPaint)
-                scrimPaint.shader = null
-            }
-        }
-        applyShadows()
-        return if (windowMode || MetroTheme.isTranslucent(context)) Color.WHITE else MetroTheme.onTileColor(base)
+        applyShadows(isWindow)
+        return if (isWindow) Color.WHITE else MetroTheme.onTileColor(base)
     }
 
     private fun drawFront(canvas: Canvas) {
@@ -369,7 +368,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             canvas.drawRect(0f, h * 0.4f, w, h, scrimPaint)
             onColor = Color.WHITE
         } else {
-            onColor = drawFill(canvas, readingText = true)
+            onColor = drawFill(canvas)
         }
         headPaint.color = onColor
         bodyPaint.color = onColor
@@ -436,37 +435,16 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         }
 
         if (!tile.size.isList) {
-            // Medium: picture and sender on one line, the message below.
-            val row = rows.first()
-            var y = contentTop
-            val avatar = mediumAvatarSize()
-            if (row.image != null) {
-                drawCover(canvas, row.image, pad, y, pad + avatar, y + avatar, paint = avatarPaint)
-                canvas.save()
-                canvas.translate(pad + avatar + dp(8f) * k, y + (avatar - (row.title?.height ?: 0)) / 2f)
-                row.title?.draw(canvas)
-                canvas.restore()
-                y += avatar + dp(6f) * k
-            } else {
-                canvas.save()
-                canvas.translate(pad, y)
-                row.title?.draw(canvas)
-                canvas.restore()
-                y += (row.title?.height ?: 0) + dp(3f) * k
+            // Medium: one notification at a time; several take turns, sliding up.
+            val idx = itemIndex.coerceAtMost(rows.size - 1)
+            val travel = contentBottom - contentTop + dp(8f) * k
+            canvas.save()
+            canvas.clipRect(0f, contentTop - dp(2f), w, contentBottom)
+            if (slide < 1f && idx > 0) {
+                drawMediumRow(canvas, rows[idx - 1], pad, contentTop - travel * slide, contentBottom - travel * slide, w)
             }
-            row.body?.let { body ->
-                // Whole lines only: never show a line cut in half.
-                val room = contentBottom - y
-                var lines = 0
-                while (lines < body.lineCount && body.getLineBottom(lines) <= room) lines++
-                if (lines > 0) {
-                    canvas.save()
-                    canvas.translate(pad, y)
-                    canvas.clipRect(0f, 0f, w - pad * 2, body.getLineBottom(lines - 1).toFloat())
-                    body.draw(canvas)
-                    canvas.restore()
-                }
-            }
+            drawMediumRow(canvas, rows[idx], pad, contentTop + travel * (1f - slide), contentBottom + travel * (1f - slide), w)
+            canvas.restore()
             return
         }
 
@@ -493,6 +471,39 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             canvas.restore()
             y += rowH + gap
             shown++
+        }
+    }
+
+    /** Medium back face content: picture and sender on one line, the message below. */
+    private fun drawMediumRow(canvas: Canvas, row: BackRow, pad: Float, top: Float, bottom: Float, w: Float) {
+        var y = top
+        val avatar = mediumAvatarSize()
+        if (row.image != null) {
+            drawCover(canvas, row.image, pad, y, pad + avatar, y + avatar, paint = avatarPaint)
+            canvas.save()
+            canvas.translate(pad + avatar + dp(8f) * k, y + (avatar - (row.title?.height ?: 0)) / 2f)
+            row.title?.draw(canvas)
+            canvas.restore()
+            y += avatar + dp(6f) * k
+        } else {
+            canvas.save()
+            canvas.translate(pad, y)
+            row.title?.draw(canvas)
+            canvas.restore()
+            y += (row.title?.height ?: 0) + dp(3f) * k
+        }
+        row.body?.let { body ->
+            // Whole lines only: never show a line cut in half.
+            val room = bottom - y
+            var lines = 0
+            while (lines < body.lineCount && body.getLineBottom(lines) <= room) lines++
+            if (lines > 0) {
+                canvas.save()
+                canvas.translate(pad, y)
+                canvas.clipRect(0f, 0f, w - pad * 2, body.getLineBottom(lines - 1).toFloat())
+                body.draw(canvas)
+                canvas.restore()
+            }
         }
     }
 
@@ -550,20 +561,20 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 ),
             )
         } else if (!tile.size.isList) {
-            val item = info.items.firstOrNull()
             headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
             headPaint.textSize = spK(17f, 13f)
             bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
             bodyPaint.textSize = spK(13f, 11f)
-            val hasPic = (item?.image ?: info.image) != null
-            val titleWidth = if (hasPic) (wInt - mediumAvatarSize() - dp(8f) * k).toInt() else wInt
-            listOf(
+            val items = info.items.take(3).ifEmpty { listOf(LiveItem(info.title, info.text, info.image, 0L)) }
+            items.map { item ->
+                val pic = item.image ?: info.image
+                val titleWidth = if (pic != null) (wInt - mediumAvatarSize() - dp(8f) * k).toInt() else wInt
                 BackRow(
-                    (item?.title ?: info.title)?.let { layout(it, headPaint, titleWidth.coerceAtLeast(1), if (hasPic) 1 else 2) },
-                    (item?.text ?: info.text)?.let { layout(it, bodyPaint, wInt, 6) },
-                    item?.image ?: info.image,
-                ),
-            )
+                    item.title?.let { layout(it, headPaint, titleWidth.coerceAtLeast(1), if (pic != null) 1 else 2) },
+                    item.text?.let { layout(it, bodyPaint, wInt, 6) },
+                    pic,
+                )
+            }
         } else {
             // List rows: sender in regular weight, message dimmer below it.
             headPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
@@ -652,41 +663,95 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     /**
      * Windows Phone live-tile flip: the tile swings away around its horizontal axis, swaps face
-     * at the edge-on point, then a stiff, slightly under-damped spring brings the new face down
-     * with a small settle, giving it physical weight. Runs on the render thread's view
-     * properties, so it stays smooth at 120 Hz.
+     * at the edge-on point, then a stiff, critically damped spring brings the new face down with
+     * no overshoot, so it lands like a solid card. Turning to new content is quick (~300ms);
+     * turning back to the icon is calmer (~450ms). Runs on the render thread's view properties,
+     * so it stays smooth at 120 Hz.
      */
     fun flip() = turn(swap = true)
 
     /** New content arrived while showing the back: flip through to reveal it. */
     fun flipRefresh() = turn(swap = false)
 
+    /** True while a flip is running, so Start can keep neighbours from flipping together. */
+    val isFlipping: Boolean get() = flipping
+
     private fun turn(swap: Boolean) {
         if (flipping) return
         if (swap && !showingBack && !hasBackFace) return
+        val toContent = !swap || !showingBack
         flipping = true
         lastFlipAt = System.currentTimeMillis()
         cameraDistance = 9000f * resources.displayMetrics.density
         pivotX = width / 2f
         pivotY = height / 2f
-        animate().rotationX(90f).setDuration(180).setInterpolator(AccelerateInterpolator(1.8f))
+        animate().rotationX(90f).setDuration(if (toContent) 130 else 190).setInterpolator(AccelerateInterpolator(1.6f))
             .setUpdateListener { syncWindow() }
             .withEndAction {
                 if (swap) showingBack = !showingBack
+                itemIndex = 0
+                slide = 1f
                 invalidate()
                 rotationX = -90f
                 syncWindow()
                 flipSpring = SpringAnimation(this, DynamicAnimation.ROTATION_X, 0f).apply {
-                    spring.stiffness = 520f
-                    spring.dampingRatio = 0.62f
+                    spring.stiffness = if (toContent) 1400f else 650f
+                    spring.dampingRatio = 1f
+                    setMinimumVisibleChange(DynamicAnimation.MIN_VISIBLE_CHANGE_ROTATION_DEGREES)
                     addUpdateListener { _, _, _ -> syncWindow() }
                     addEndListener { _, _, _, _ ->
                         flipping = false
                         syncWindow()
+                        if (showingBack) scheduleCycle()
                     }
                     start()
                 }
             }.start()
+    }
+
+    // ---- Several notifications on a medium tile: they take turns with a short vertical slide.
+
+    /** Which notification the medium back face shows. */
+    private var itemIndex = 0
+    /** 0..1 while sliding from the previous notification to [itemIndex]. */
+    private var slide = 1f
+    private var slideAnim: android.animation.ValueAnimator? = null
+    private val cycleRunnable = Runnable { advanceItem() }
+
+    /** Notifications a medium tile cycles through (up to 3). */
+    private val cycleCount: Int
+        get() {
+            val info = live ?: return 1
+            if (info.isMusic || info.ongoing || tile.size != TileSize.MEDIUM) return 1
+            return info.items.size.coerceIn(1, 3)
+        }
+
+    /** How long the content face stays: 6–7s, plus about 2.5s for each extra notification. */
+    fun pickBackDwell(random: java.util.Random) {
+        backDwellMs = 6000L + random.nextInt(1000) + 2500L * (cycleCount - 1)
+    }
+
+    private fun scheduleCycle() {
+        removeCallbacks(cycleRunnable)
+        val n = cycleCount
+        if (n <= 1 || itemIndex >= n - 1) return
+        postDelayed(cycleRunnable, (backDwellMs - 400) / n)
+    }
+
+    private fun advanceItem() {
+        if (!showingBack || flipping || itemIndex >= cycleCount - 1) return
+        itemIndex++
+        slideAnim?.cancel()
+        slideAnim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 280
+            interpolator = DecelerateInterpolator(1.8f)
+            addUpdateListener {
+                slide = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+        scheduleCycle()
     }
 
     /**
@@ -699,6 +764,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     /** Snaps back to the front face immediately (e.g. when Start is left). */
     fun resetFace() {
+        removeCallbacks(cycleRunnable)
+        slideAnim?.cancel()
+        itemIndex = 0
+        slide = 1f
         animate().cancel()
         flipSpring?.cancel()
         flipping = false

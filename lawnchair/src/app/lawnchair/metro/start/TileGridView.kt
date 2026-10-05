@@ -17,6 +17,12 @@ import app.lawnchair.metro.data.TileSize
  * never has gaps the user didn't create. As on Windows Phone, tiles two or more cells wide only
  * start on even columns and rows, keeping medium tiles lined up in 2×2 blocks.
  *
+ * Gaps: Start is broken into loose groups by slightly wider spaces between some rows, purely
+ * for rhythm. They're placed automatically wherever no tile crosses the row line: one between
+ * the live tiles at the top of the first screen and the easy-reach apps below them, then at
+ * uneven intervals further down. Because they follow the tiles, they re-settle on their own
+ * after tiles are moved.
+ *
  * An optional [footer] (the app-list arrow) sits below the last tile, so it only comes into
  * view at the end of the list, as on Windows Phone.
  */
@@ -98,9 +104,50 @@ class TileGridView(context: Context) : ViewGroup(context) {
     /** Height of one row of small tiles, including the gap. */
     val rowPitch: Int get() = cellSize + gutter
 
-    /** Rows of small tiles that fit in [viewportHeight] below the top inset. */
+    /** Extra space of a group gap, about half a small tile. */
+    val groupGap: Int get() = (cellSize * 0.42f).toInt()
+
+    /** Rows before which a group gap sits. */
+    private var gapRows = IntArray(0)
+
+    /** Rows of small tiles that fit in [viewportHeight] below the top inset (one gap allowed). */
     fun rowsInViewport(viewportHeight: Int): Int =
-        ((viewportHeight - topPadding - bottomInset + gutter) / rowPitch.coerceAtLeast(1)).coerceAtLeast(2)
+        ((viewportHeight - topPadding - bottomInset - groupGap + gutter) / rowPitch.coerceAtLeast(1)).coerceAtLeast(2)
+
+    /** Top of cell row [row], counting the group gaps above it. */
+    private fun rowTop(row: Int): Int = topPadding + row * (cellSize + gutter) + groupGap * gapRows.count { it <= row }
+
+    /** Picks group-gap rows from where the tiles sit (see the class comment). */
+    private fun computeGaps(tileViews: List<View>, usedRows: Int) {
+        val viewport = (parent as? View)?.height ?: 0
+        if (viewport <= 0 || usedRows < 4) {
+            gapRows = IntArray(0)
+            return
+        }
+        val crossing = BooleanArray(usedRows + 1)
+        tileViews.forEachIndexed { i, v ->
+            val top = positions[i * 2 + 1]
+            for (r in top + 1 until top + v.holder().tile.size.rowSpan) if (r <= usedRows) crossing[r] = true
+        }
+        fun clean(r: Int) = r in 2 until usedRows && !crossing[r]
+        val out = ArrayList<Int>()
+        val screenRows = rowsInViewport(viewport)
+        val screenBlocks = maxOf(2, screenRows / 2)
+        val thumbBlocks = maxOf(1, Math.round(screenBlocks * 0.4f))
+        // Between the glance area and the easy-reach area of the first screen.
+        val split = (screenBlocks - thumbBlocks) * 2
+        intArrayOf(0, 1, -1, 2, -2).map { split + it }.firstOrNull(::clean)?.let { out += it }
+        // Below the first screen, at uneven intervals so the groups don't become a pattern.
+        val intervals = intArrayOf(2, 3, 2, 1, 3)
+        var next = screenBlocks * 2
+        var k = 0
+        while (next < usedRows) {
+            val r = (next until usedRows).firstOrNull { clean(it) && out.none { g -> kotlin.math.abs(g - it) < 2 } } ?: break
+            out += r
+            next = r + intervals[k++ % intervals.size] * 2
+        }
+        gapRows = out.sorted().toIntArray()
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
@@ -119,7 +166,8 @@ class TileGridView(context: Context) : ViewGroup(context) {
             MeasureSpec.makeMeasureSpec(footerSize, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(footerSize, MeasureSpec.EXACTLY),
         )
-        val contentHeight = if (rows == 0) 0 else rows * cellSize + (rows - 1) * gutter
+        computeGaps(tileViews, rows)
+        val contentHeight = if (rows == 0) 0 else rows * cellSize + (rows - 1) * gutter + groupGap * gapRows.size
         contentBottom = topPadding + contentHeight
         val footerSpace = if (footer != null) footerMargin * 2 + footerSize else dp(24f).toInt()
         var height = contentBottom + footerSpace + bottomInset
@@ -134,7 +182,7 @@ class TileGridView(context: Context) : ViewGroup(context) {
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         tiles.forEachIndexed { i, child ->
             val left = positions[i * 2] * (cellSize + gutter)
-            val top = topPadding + positions[i * 2 + 1] * (cellSize + gutter)
+            val top = rowTop(positions[i * 2 + 1])
             child.layout(left, top, left + child.measuredWidth, top + child.measuredHeight)
         }
         footer?.let {

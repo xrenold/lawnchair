@@ -58,9 +58,6 @@ object MetroTheme {
     private fun prefs(context: Context) = PreferenceManager.getInstance(context)
 
     @JvmStatic
-    fun isTranslucent(context: Context) = prefs(context).metroTileStyle.get() == "translucent"
-
-    @JvmStatic
     fun background(context: Context): String = prefs(context).metroBackground.get()
 
     @JvmStatic
@@ -81,21 +78,12 @@ object MetroTheme {
      */
     @JvmStatic
     fun tileColor(context: Context, stableKey: String, overrideColor: Int): Int {
-        if (overrideColor != 0) return overrideColor
+        if (Color.alpha(overrideColor) != 0) return overrideColor // brand/accent sentinels have none
         return when (prefs(context).metroColorMode.get()) {
             MODE_CLASSIC -> classicAccent(context)
             MODE_MONET_TONAL -> tonal(context, stableKey)
             else -> accent(context)
         }
-    }
-
-    /** Tile colour with the user's opacity applied (only when tiles are translucent). */
-    @JvmStatic
-    fun tileFill(context: Context, stableKey: String, overrideColor: Int): Int {
-        val base = tileColor(context, stableKey, overrideColor)
-        if (!isTranslucent(context)) return base
-        val opacity = prefs(context).metroTileOpacity.get().coerceIn(10, 100)
-        return ColorUtils.setAlphaComponent(base, opacity * 255 / 100)
     }
 
     /** White, or a dark tone on very light tiles so labels stay readable. */

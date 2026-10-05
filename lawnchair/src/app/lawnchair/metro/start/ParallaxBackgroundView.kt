@@ -26,10 +26,10 @@ class ParallaxBackgroundView(context: Context) : View(context) {
     private var progress = 0f
 
     /** How much taller than the screen the photo is drawn, as a fraction of the height. */
-    private val travel = 0.12f
+    private val travel = TRAVEL_Y
 
     /** How much wider than the screen, for the sideways drift when the app list slides in. */
-    private val travelX = 0.10f
+    private val travelX = TRAVEL_X
     private var blurRadius = 0f
 
     fun load() {
@@ -49,6 +49,9 @@ class ParallaxBackgroundView(context: Context) : View(context) {
     }
 
     val hasImage get() = bitmap != null
+
+    /** The loaded photo, for measuring its brightness. */
+    val image: Bitmap? get() = bitmap
 
     /** 0 at the top of Start, 1 at the bottom. Only moves the view: no redraw needed. */
     fun setScrollFraction(fraction: Float) {
@@ -96,6 +99,10 @@ class ParallaxBackgroundView(context: Context) : View(context) {
     }
 
     companion object {
+        /** Extra photo height and width beyond the screen, for the vertical and sideways drift. */
+        const val TRAVEL_Y = 0.12f
+        const val TRAVEL_X = 0.10f
+
         @JvmStatic
         fun file(context: Context) = File(context.filesDir, "metro_start_background.jpg")
     }

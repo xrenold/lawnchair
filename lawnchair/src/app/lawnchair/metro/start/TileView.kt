@@ -203,8 +203,27 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         MetroIcons.get(context, target) { apply(it) }?.let { apply(it) }
     }
 
+    /** True while picked up for dragging: a black frame sets it apart from the tiles below. */
+    var lifted = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+    private val liftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.BLACK
+    }
+
+    /** Width of the black frame around a lifted tile. */
+    val liftBorder: Float get() = dp(4f)
+
     override fun onDraw(canvas: Canvas) {
         if (showingBack && hasBackFace) drawBack(canvas) else drawFront(canvas)
+        if (lifted) {
+            val b = liftBorder
+            liftPaint.strokeWidth = b
+            canvas.drawRect(b / 2f, b / 2f, width - b / 2f, height - b / 2f, liftPaint)
+        }
     }
 
     private fun drawFill(canvas: Canvas): Int {

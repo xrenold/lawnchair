@@ -161,7 +161,15 @@ class TileGridView(context: Context) : ViewGroup(context) {
         holePath.rewind()
         for (c in tiles) {
             if (c.visibility != View.VISIBLE) continue
-            if (c.matrix.isIdentity) {
+            if (c.lifted) {
+                // Dragged tile: its window sits inside its black frame, on top of the others.
+                val b = c.liftBorder
+                tileRectPath.rewind()
+                tileRectPath.addRect(b, b, c.width - b, c.height - b, Path.Direction.CW)
+                tileRectPath.transform(c.matrix)
+                tileRectPath.offset(c.left.toFloat(), c.top.toFloat())
+                holePath.addPath(tileRectPath)
+            } else if (c.matrix.isIdentity) {
                 holePath.addRect(c.left.toFloat(), c.top.toFloat(), c.right.toFloat(), c.bottom.toFloat(), Path.Direction.CW)
             } else {
                 // Flipping or pressed: cut the hole in the tile's projected (3D-rotated) shape.

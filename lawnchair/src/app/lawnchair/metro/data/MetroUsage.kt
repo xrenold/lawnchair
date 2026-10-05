@@ -214,14 +214,51 @@ object MetroUsage {
     @JvmStatic
     fun hasUsageAccess(context: Context): Boolean {
         val ops = context.getSystemService(AppOpsManager::class.java) ?: return false
-        @Suppress("DEPRECATION")
-        val mode = ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
-        return mode == AppOpsManager.MODE_ALLOWED
+        val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
+        } else {
+            @Suppress("DEPRECATION")
+            ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
+        }
+        // Some devices (Samsung among them) report "default" and leave it to the permission.
+        return mode == AppOpsManager.MODE_ALLOWED ||
+            (mode == AppOpsManager.MODE_DEFAULT &&
+                context.checkSelfPermission(android.Manifest.permission.PACKAGE_USAGE_STATS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
+
+    /**
+     * How often each app was opened over the last 14 days, from Android's usage events, with
+     * recent days weighted more (same half-life as Metro's own counts). Counts each time an app
+     * comes to the front after another app, so moving between screens of one app counts once.
+     * Empty without Usage access.
+     */
+    fun appOpens(context: Context): Map<String, Double> {
+        val usm = context.getSystemService(UsageStatsManager::class.java) ?: return emptyMap()
+        val end = System.currentTimeMillis()
+        val start = end - TimeUnit.DAYS.toMillis(14)
+        return runCatching {
+            val events = usm.queryEvents(start, end)
+            val e = android.app.usage.UsageEvents.Event()
+            val out = HashMap<String, Double>()
+            var lastPkg: String? = null
+            while (events.hasNextEvent()) {
+                events.getNextEvent(e)
+                @Suppress("DEPRECATION")
+                if (e.eventType != android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) continue
+                val pkg = e.packageName ?: continue
+                if (pkg == lastPkg) continue
+                lastPkg = pkg
+                if (pkg == context.packageName) continue
+                val ageDays = (end - e.timeStamp) / 86_400_000.0
+                out[pkg] = (out[pkg] ?: 0.0) + Math.pow(0.5, ageDays / HALF_LIFE_DAYS)
+            }
+            out
+        }.getOrDefault(emptyMap())
     }
 
     /** Minutes in the foreground per app over the last 14 days (empty without Usage access). */
     fun foregroundMinutes(context: Context): Map<String, Double> {
-        if (!hasUsageAccess(context)) return emptyMap()
         val usm = context.getSystemService(UsageStatsManager::class.java) ?: return emptyMap()
         val end = System.currentTimeMillis()
         val start = end - TimeUnit.DAYS.toMillis(14)

@@ -445,6 +445,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         drag = d
         view.parent?.requestDisallowInterceptTouchEvent(true)
         grid.draggedView = view
+        view.lifted = true
         view.translationZ = dp(8f)
         view.animate().scaleX(1.06f).scaleY(1.06f).alpha(0.92f).setDuration(140)
             .setUpdateListener { grid.invalidate() }.start()
@@ -553,7 +554,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         v.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).alpha(1f).setDuration(200)
             .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
             .setUpdateListener { grid.invalidate() }
-            .withEndAction { v.translationZ = 0f; grid.invalidate() }
+            .withEndAction {
+                v.translationZ = 0f
+                v.lifted = false
+                grid.invalidate()
+            }
             .start()
         if (d.moved) {
             tiles = grid.tiles.map { it.tile }.toMutableList()

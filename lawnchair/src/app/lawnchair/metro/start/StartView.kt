@@ -250,8 +250,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val menu = PopupMenu(launcher, view, Gravity.END)
         val sizes = menu.menu.addSubMenu(Menu.NONE, MENU_RESIZE, 0, "Resize")
         TileSize.entries.forEachIndexed { i, size ->
-            sizes.add(GROUP_SIZE, i, i, size.name.lowercase().replaceFirstChar { it.uppercase() })
-                .setCheckable(true).isChecked = size == tile.size
+            if (size.sixColumnsOnly && grid.columns < 6 && size != tile.size) return@forEachIndexed
+            sizes.add(GROUP_SIZE, i, i, size.label).setCheckable(true).isChecked = size == tile.size
         }
         sizes.setGroupCheckable(GROUP_SIZE, true, true)
 

@@ -155,9 +155,10 @@ class TileGridView(context: Context) : ViewGroup(context) {
             val span = size.span.coerceAtMost(columns)
             val rowSpan = size.rowSpan
             val aligned = span >= 2
+            val alignRows = aligned && rowSpan >= 2
             var row = 0
             placing@ while (true) {
-                if (aligned && row % 2 != 0) {
+                if (alignRows && row % 2 != 0) {
                     row++
                     continue
                 }

@@ -12,20 +12,22 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Windows Phone tile sizes, measured in small-tile cells. */
-enum class TileSize(val span: Int, val rowSpan: Int) {
-    SMALL(1, 1),
-    MEDIUM(2, 2),
-    WIDE(4, 2),
-    LARGE(4, 4),
+enum class TileSize(val span: Int, val rowSpan: Int, val label: String, val sixColumnsOnly: Boolean = false) {
+    SMALL(1, 1, "Small"),
+    MEDIUM(2, 2, "Medium"),
+    WIDE(4, 2, "Wide"),
+    LARGE(4, 4, "Large"),
+    /** Full-width strip, one small tile high (6-column Start). */
+    BANNER(6, 1, "Banner (6×1)", sixColumnsOnly = true),
+    /** Full-width, two small tiles high (6-column Start). */
+    EXTRA_WIDE(6, 2, "Extra wide (6×2)", sixColumnsOnly = true),
     ;
 
-    /** Next size when cycling with the resize button, as on WP 8.1 (large skipped by default). */
-    fun next(allowLarge: Boolean): TileSize = when (this) {
-        MEDIUM -> SMALL
-        SMALL -> WIDE
-        WIDE -> if (allowLarge) LARGE else MEDIUM
-        LARGE -> MEDIUM
-    }
+    /** One cell tall and several wide: content is laid out in a single row. */
+    val isStrip: Boolean get() = rowSpan == 1 && span > 1
+
+    /** Sizes that list several messages when live. */
+    val isList: Boolean get() = this == WIDE || this == LARGE || this == EXTRA_WIDE
 }
 
 /**

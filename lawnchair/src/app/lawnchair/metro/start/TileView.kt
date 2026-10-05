@@ -129,6 +129,18 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
 
     private class BackRow(val title: StaticLayout?, val body: StaticLayout?, val image: Bitmap?)
 
+    /**
+     * Type and spacing scale for this tile, from its cell size: 1.0 on the 4-column grid,
+     * about 0.7 on the 6-column grid, so live content keeps its proportions on both.
+     */
+    private val k: Float
+        get() {
+            val cellDp = height.toFloat() / tile.size.rowSpan / resources.displayMetrics.density
+            return (cellDp / 99f).coerceIn(0.68f, 1.1f)
+        }
+
+    private fun spK(v: Float, min: Float) = maxOf(sp(v) * k, sp(min))
+
     init {
         isClickable = true
         isLongClickable = true
@@ -205,6 +217,13 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         val count = live?.count ?: 0
         val onColor = drawFill(canvas)
 
+        labelPaint.textSize = spK(13f, 11.5f)
+
+        if (tile.size.isStrip) {
+            drawStripFront(canvas, onColor, count)
+            return
+        }
+
         // Icon: every glyph gets the same box for a given tile size, measured from its visible
         // artwork, so apps with padded or oversized icons line up with the rest.
         icon?.let { bmp ->
@@ -252,6 +271,39 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         }
     }
 
+    /** 6×1 front: icon on the left, name beside it, count on the right, all on one line. */
+    private fun drawStripFront(canvas: Canvas, onColor: Int, count: Int) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val pad = dp(12f) * k
+        var x = pad
+        icon?.let { bmp ->
+            val userScale = PreferenceManager.getInstance(context).metroIconSize.get() / 100f
+            val box = h * 0.46f * userScale * (if (iconIsMonochrome) 1f else 0.9f)
+            val scale = box / maxOf(bmp.width, bmp.height)
+            val iw = bmp.width * scale
+            val ih = bmp.height * scale
+            iconRect.set(x, (h - ih) / 2f, x + iw, (h + ih) / 2f)
+            iconPaint.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
+            canvas.drawBitmap(bmp, null, iconRect, iconPaint)
+            x += box + dp(12f) * k
+        }
+        var right = w - pad
+        if (count > 0) {
+            countPaint.textSize = spK(22f, 16f)
+            countPaint.color = onColor
+            val t = countLabel(count)
+            val fm = countPaint.fontMetrics
+            right -= countPaint.measureText(t)
+            canvas.drawText(t, right, h / 2f - (fm.ascent + fm.descent) / 2f, countPaint)
+            right -= dp(10f)
+        }
+        labelPaint.color = onColor
+        val text = TextUtils.ellipsize(label, labelPaint, right - x, TextUtils.TruncateAt.END)
+        val fm = labelPaint.fontMetrics
+        canvas.drawText(text, 0, text.length, x, h / 2f - (fm.ascent + fm.descent) / 2f, labelPaint)
+    }
+
     /**
      * Back face.
      *  - Music: album art fills the tile, track and artist over a dark fade.
@@ -264,7 +316,7 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         val info = live ?: return
         val w = width.toFloat()
         val h = height.toFloat()
-        val pad = dp(10f)
+        val pad = dp(10f) * k
 
         val art = info.image
         val onColor: Int
@@ -278,23 +330,22 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         }
         headPaint.color = onColor
         bodyPaint.color = onColor
+        labelPaint.textSize = spK(13f, 11f)
+
+        if (tile.size.isStrip) {
+            drawStripBack(canvas, info, onColor, pad)
+            return
+        }
 
         // Footer: app icon + name, count on the right.
-        val footerIcon = dp(16f)
+        val footerIcon = dp(16f) * k
         val footerBaseline = h - pad - labelPaint.descent()
-        val footerTop = h - pad - footerIcon
-        icon?.let { bmp ->
-            val s = footerIcon / maxOf(bmp.width, bmp.height)
-            val iw = bmp.width * s
-            val ih = bmp.height * s
-            iconRect.set(pad, footerTop + (footerIcon - ih) / 2f, pad + iw, footerTop + (footerIcon + ih) / 2f)
-            iconPaint.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
-            canvas.drawBitmap(bmp, null, iconRect, iconPaint)
-        }
-        val labelX = pad + footerIcon + dp(6f)
+        val footerTop = h - pad - maxOf(footerIcon, labelPaint.textSize)
+        drawAppIcon(canvas, pad, h - pad - footerIcon, footerIcon, onColor)
+        val labelX = pad + footerIcon + dp(6f) * k
         var countW = 0f
         if (info.count > 0 && !info.isMusic) {
-            countPaint.textSize = sp(13f)
+            countPaint.textSize = spK(13f, 11f)
             countPaint.color = onColor
             val t = countLabel(info.count)
             countW = countPaint.measureText(t) + dp(6f)
@@ -306,7 +357,7 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
 
         // Content area above the footer.
         val contentTop = pad
-        val contentBottom = footerTop - dp(8f)
+        val contentBottom = footerTop - dp(8f) * k
         val rows = ensureBackLayouts(info, (w - pad * 2).toInt())
         if (rows.isEmpty()) return
 
@@ -323,99 +374,180 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
             return
         }
 
-        if (tile.size == TileSize.MEDIUM) {
-            // One message: picture and sender on top, the message below.
+        if (!tile.size.isList) {
+            // Medium: picture and sender on one line, the message below.
             val row = rows.first()
             var y = contentTop
-            val avatar = dp(40f)
+            val avatar = mediumAvatarSize()
             if (row.image != null) {
                 drawCover(canvas, row.image, pad, y, pad + avatar, y + avatar, paint = avatarPaint)
                 canvas.save()
-                canvas.translate(pad + avatar + dp(8f), y + (avatar - (row.title?.height ?: 0)) / 2f)
+                canvas.translate(pad + avatar + dp(8f) * k, y + (avatar - (row.title?.height ?: 0)) / 2f)
                 row.title?.draw(canvas)
                 canvas.restore()
-                y += avatar + dp(6f)
+                y += avatar + dp(6f) * k
             } else {
                 canvas.save()
                 canvas.translate(pad, y)
                 row.title?.draw(canvas)
                 canvas.restore()
-                y += (row.title?.height ?: 0) + dp(2f)
+                y += (row.title?.height ?: 0) + dp(3f) * k
             }
             row.body?.let { body ->
-                canvas.save()
-                canvas.translate(pad, y)
-                canvas.clipRect(0f, 0f, w - pad * 2, contentBottom - y)
-                body.draw(canvas)
-                canvas.restore()
+                // Whole lines only: never show a line cut in half.
+                val room = contentBottom - y
+                var lines = 0
+                while (lines < body.lineCount && body.getLineBottom(lines) <= room) lines++
+                if (lines > 0) {
+                    canvas.save()
+                    canvas.translate(pad, y)
+                    canvas.clipRect(0f, 0f, w - pad * 2, body.getLineBottom(lines - 1).toFloat())
+                    body.draw(canvas)
+                    canvas.restore()
+                }
             }
             return
         }
 
-        // Wide and large: a list of messages, as many as fit.
+        // Wide, extra wide and large: a list of messages with breathing room between them.
         val avatar = rowAvatarSize()
+        val gap = dp(12f) * k
         var y = contentTop
+        var shown = 0
         for (row in rows) {
+            if (shown >= maxListRows()) break
             val textH = (row.title?.height ?: 0) + (row.body?.height ?: 0)
             val rowH = maxOf(if (row.image != null) avatar else 0f, textH.toFloat())
             if (y + rowH > contentBottom) break
             var x = pad
             if (row.image != null) {
-                drawCover(canvas, row.image, pad, y, pad + avatar, y + avatar, paint = avatarPaint)
-                x += avatar + dp(8f)
+                drawCover(canvas, row.image, pad, y + (rowH - avatar) / 2f, pad + avatar, y + (rowH + avatar) / 2f, paint = avatarPaint)
+                x += avatar + dp(10f) * k
             }
             canvas.save()
-            canvas.translate(x, y)
+            canvas.translate(x, y + (rowH - textH) / 2f)
             row.title?.draw(canvas)
             canvas.translate(0f, (row.title?.height ?: 0).toFloat())
             row.body?.draw(canvas)
             canvas.restore()
-            y += rowH + dp(8f)
+            y += rowH + gap
+            shown++
         }
     }
 
-    private fun rowAvatarSize() = if (tile.size == TileSize.LARGE) dp(40f) else dp(34f)
+    /** 6×1 back: picture, then sender and message on two short lines, app icon and count right. */
+    private fun drawStripBack(canvas: Canvas, info: LiveInfo, onColor: Int, pad: Float) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        var x = pad
+        val pic = info.items.firstOrNull()?.image ?: info.image
+        if (pic != null) {
+            val a = h - pad * 2
+            drawCover(canvas, pic, x, pad, x + a, pad + a, paint = if (info.isMusic) artPaint else avatarPaint)
+            x += a + dp(10f) * k
+        }
+        // Right: app icon with the count under it.
+        val iconSize = dp(16f) * k
+        var right = w - pad - iconSize
+        drawAppIcon(canvas, right, if (info.count > 0) h / 2f - iconSize else (h - iconSize) / 2f, iconSize, onColor)
+        if (info.count > 0 && !info.isMusic) {
+            countPaint.textSize = spK(12f, 10f)
+            countPaint.color = onColor
+            val t = countLabel(info.count)
+            canvas.drawText(t, right + (iconSize - countPaint.measureText(t)) / 2f, h / 2f + dp(2f) - countPaint.ascent(), countPaint)
+        }
+        right -= dp(10f) * k
+        val rows = ensureBackLayouts(info, (right - x).toInt())
+        val row = rows.firstOrNull() ?: return
+        val textH = (row.title?.height ?: 0) + (row.body?.height ?: 0)
+        canvas.save()
+        canvas.translate(x, (h - textH) / 2f)
+        row.title?.draw(canvas)
+        canvas.translate(0f, (row.title?.height ?: 0).toFloat())
+        row.body?.draw(canvas)
+        canvas.restore()
+    }
+
+    private fun drawAppIcon(canvas: Canvas, left: Float, top: Float, size: Float, onColor: Int) {
+        val bmp = icon ?: return
+        val s = size / maxOf(bmp.width, bmp.height)
+        val iw = bmp.width * s
+        val ih = bmp.height * s
+        iconRect.set(left + (size - iw) / 2f, top + (size - ih) / 2f, left + (size + iw) / 2f, top + (size + ih) / 2f)
+        iconPaint.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
+        canvas.drawBitmap(bmp, null, iconRect, iconPaint)
+    }
+
+    private fun mediumAvatarSize() = dp(34f) * k
+
+    /** At most this many messages, so rows never crowd each other. */
+    private fun maxListRows() = when (tile.size) {
+        TileSize.LARGE -> if (k < 0.9f) 3 else 4
+        else -> if (k < 0.9f) 1 else 2
+    }
+
+    private fun rowAvatarSize() = (if (tile.size == TileSize.LARGE) dp(40f) else dp(36f)) * k
 
     private fun ensureBackLayouts(info: LiveInfo, width: Int): List<BackRow> {
         val wInt = width.coerceAtLeast(1)
         backLayouts?.let { if (backLayoutsWidth == wInt) return it }
         backLayoutsWidth = wInt
 
+        // Secondary text (the message under a sender) is slightly dimmer, for hierarchy.
+        val dim = ColorUtils.setAlphaComponent(bodyPaint.color, 0xC8)
         val rows: List<BackRow> = if (info.isMusic) {
             headPaint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            headPaint.textSize = sp(if (tile.size == TileSize.MEDIUM) 15f else 17f)
-            bodyPaint.textSize = sp(13f)
+            headPaint.textSize = spK(if (tile.size == TileSize.MEDIUM) 15f else 17f, 12.5f)
+            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.textSize = spK(13f, 11f)
+            bodyPaint.color = dim
             listOf(
                 BackRow(
-                    info.title?.let { layout(it, headPaint, wInt, 2) },
+                    info.title?.let { layout(it, headPaint, wInt, if (tile.size.isStrip) 1 else 2) },
                     info.text?.let { layout(it, bodyPaint, wInt, 1) },
                     null,
                 ),
             )
-        } else if (tile.size == TileSize.MEDIUM) {
+        } else if (tile.size.isStrip) {
             val item = info.items.firstOrNull()
-            headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            headPaint.textSize = sp(17f)
+            headPaint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            headPaint.textSize = spK(14f, 12f)
             bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-            bodyPaint.textSize = sp(13f)
-            val titleWidth = if (item?.image != null) (wInt - dp(48f)).toInt() else wInt
+            bodyPaint.textSize = spK(13f, 11f)
+            bodyPaint.color = dim
             listOf(
                 BackRow(
-                    (item?.title ?: info.title)?.let { layout(it, headPaint, titleWidth.coerceAtLeast(1), 2) },
-                    (item?.text ?: info.text)?.let { layout(it, bodyPaint, wInt, 4) },
+                    (item?.title ?: info.title)?.let { layout(it, headPaint, wInt, 1) },
+                    (item?.text ?: info.text)?.let { layout(it, bodyPaint, wInt, 1) },
+                    null,
+                ),
+            )
+        } else if (!tile.size.isList) {
+            val item = info.items.firstOrNull()
+            headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            headPaint.textSize = spK(17f, 13f)
+            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.textSize = spK(13f, 11f)
+            val hasPic = (item?.image ?: info.image) != null
+            val titleWidth = if (hasPic) (wInt - mediumAvatarSize() - dp(8f) * k).toInt() else wInt
+            listOf(
+                BackRow(
+                    (item?.title ?: info.title)?.let { layout(it, headPaint, titleWidth.coerceAtLeast(1), if (hasPic) 1 else 2) },
+                    (item?.text ?: info.text)?.let { layout(it, bodyPaint, wInt, 6) },
                     item?.image ?: info.image,
                 ),
             )
         } else {
-            // List rows: sender in a heavier weight, message in regular.
-            headPaint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            headPaint.textSize = sp(14f)
+            // List rows: sender in regular weight, message dimmer below it.
+            headPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            headPaint.textSize = spK(14.5f, 12f)
             bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-            bodyPaint.textSize = sp(13f)
+            bodyPaint.textSize = spK(13f, 11f)
+            bodyPaint.color = dim
             val bodyLines = if (tile.size == TileSize.LARGE) 2 else 1
             val items = info.items.ifEmpty { listOf(LiveItem(info.title, info.text, info.image, 0L)) }
             items.map { item ->
-                val textW = if (item.image != null) (wInt - rowAvatarSize() - dp(8f)).toInt() else wInt
+                val textW = if (item.image != null) (wInt - rowAvatarSize() - dp(10f) * k).toInt() else wInt
                 BackRow(
                     item.title?.let { layout(it, headPaint, textW.coerceAtLeast(1), 1) },
                     item.text?.let { layout(it, bodyPaint, textW.coerceAtLeast(1), bodyLines) },
@@ -433,6 +565,7 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
             .setEllipsize(TextUtils.TruncateAt.END)
             .setMaxLines(maxLines)
             .setIncludePad(false)
+            .setLineSpacing(0f, 1.06f)
             .build()
 
     /** Draws [bmp] scaled to fill the rectangle, cropping the overflow (centre-crop). */

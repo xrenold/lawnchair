@@ -660,7 +660,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     private var photoShadeH = -1f
     private var musicScrimH = -1f
     private var musicScrim: LinearGradient? = null
-    private val shaders = java.util.WeakHashMap<Bitmap, BitmapShader>()
+    /** A few recent shaders (album art, avatars), bounded so old pictures can be freed. */
+    private val shaders = object : java.util.LinkedHashMap<Bitmap, BitmapShader>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Bitmap, BitmapShader>?) = size > 6
+    }
 
     /** Reloads the icon (icon pack or Material You colours changed). */
     fun reloadIcon() = loadIconAsync()

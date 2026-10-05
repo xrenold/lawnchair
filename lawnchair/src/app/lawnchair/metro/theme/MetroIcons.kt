@@ -71,6 +71,8 @@ object MetroIcons {
     private val main = Handler(Looper.getMainLooper())
     private const val RENDER_SIZE = 192
 
+    private val packFailed = ThreadLocal.withInitial { false }
+
     /** Icon pack in use when keys are made, so switching packs never shows stale icons. */
     @Volatile private var packKey = ""
 
@@ -96,7 +98,10 @@ object MetroIcons {
             pack.loadBlocking()
             val entry = pack.getIcon(target) ?: return null
             provider.getDrawable(entry, context.resources.displayMetrics.densityDpi, user)
-        }.getOrNull()
+        }.getOrElse {
+            packFailed.set(true) // don't save this result: the pack may just be busy updating
+            null
+        }
     }
 
     /** Average colour of the visible pixels of [bmp]. */
@@ -177,13 +182,22 @@ object MetroIcons {
     // icon pack or language changes, or (for packs that follow Material You) the palette changes.
 
     private fun diskKey(context: Context, target: ComponentName, user: UserHandle): String {
-        val stamp = runCatching { context.packageManager.getPackageInfo(target.packageName, 0).lastUpdateTime }.getOrDefault(0L)
+        // Per user, so work-profile apps get their own update time too.
+        val stamp = runCatching {
+            val ai = context.getSystemService(LauncherApps::class.java).getApplicationInfo(target.packageName, 0, user)
+            java.io.File(ai.sourceDir).lastModified()
+        }.getOrDefault(0L)
+        val packStamp = if (packKey.isNotEmpty()) {
+            runCatching { context.packageManager.getPackageInfo(packKey, 0).lastUpdateTime }.getOrDefault(0L)
+        } else {
+            0L
+        }
         val palette = if (packKey.isNotEmpty() && Build.VERSION.SDK_INT >= 31) {
             context.getColor(android.R.color.system_accent1_500)
         } else {
             0
         }
-        val raw = "${target.flattenToString()}#${user.hashCode()}#$packKey#$stamp#$palette#" +
+        val raw = "${target.flattenToString()}#${user.hashCode()}#$packKey@$packStamp#$stamp#$palette#" +
             "${java.util.Locale.getDefault().toLanguageTag()}#${context.resources.displayMetrics.densityDpi}"
         return Integer.toHexString(raw.hashCode()) + "_" + Integer.toHexString(raw.reversed().hashCode())
     }
@@ -194,31 +208,50 @@ object MetroIcons {
         val dir = diskDir(context)
         val meta = java.io.File(dir, "$key.meta").takeIf { it.exists() }?.readText() ?: return null
         val p = meta.split('\u0001')
-        if (p.size < 8) return null
-        val png = java.io.File(dir, "$key.png")
-        val bmp = if (png.exists()) android.graphics.BitmapFactory.decodeFile(png.path) else null
+        if (p.size < 8 || p[7] != "v2") return null
+        // A missing or unreadable picture is a miss, never a blank icon.
+        val bmp = android.graphics.BitmapFactory.decodeFile(java.io.File(dir, "$key.png").path) ?: return null
         Icon(bmp, p[0] == "1", p[1], p[2].toInt(), p[3].toInt(), p[4].toFloat(), p[5] == "1", p[6].toInt())
     }.getOrNull()
 
     private fun writeDisk(context: Context, key: String, icon: Icon) {
+        val b = icon.bitmap ?: return
         runCatching {
             val dir = diskDir(context)
-            icon.bitmap?.let { b -> java.io.File(dir, "$key.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+            // Written to temporary names and renamed, picture first and details last, so a
+            // reader never sees half a pair.
+            val tag = Thread.currentThread().id
+            val pngTmp = java.io.File(dir, "$key.png.$tag.tmp")
+            pngTmp.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            pngTmp.renameTo(java.io.File(dir, "$key.png"))
             val meta = listOf(
                 if (icon.monochrome) "1" else "0", icon.label.toString().replace('\u0001', ' '), icon.brandColor, icon.brandTile,
-                icon.brandStrength, if (icon.fromPack) "1" else "0", icon.packColor, "v1",
+                icon.brandStrength, if (icon.fromPack) "1" else "0", icon.packColor, "v2",
             ).joinToString("\u0001")
-            java.io.File(dir, "$key.meta").writeText(meta)
-            // Keep the folder small: drop the oldest half when it grows large.
-            val files = dir.listFiles().orEmpty()
-            if (files.size > 1600) files.sortedBy { it.lastModified() }.take(files.size / 2).forEach { it.delete() }
+            val metaTmp = java.io.File(dir, "$key.meta.$tag.tmp")
+            metaTmp.writeText(meta)
+            metaTmp.renameTo(java.io.File(dir, "$key.meta"))
+            // Keep the folder small: drop the oldest half of the icons (both files) when it grows.
+            val metas = dir.listFiles { f -> f.name.endsWith(".meta") }.orEmpty()
+            if (metas.size > 800) {
+                metas.sortedBy { it.lastModified() }.take(metas.size / 2).forEach { m ->
+                    val k = m.name.removeSuffix(".meta")
+                    m.delete()
+                    java.io.File(dir, "$k.png").delete()
+                }
+            }
         }
     }
 
     private fun load(context: Context, target: ComponentName, user: UserHandle): Icon {
         val key = diskKey(context, target, user)
         readDisk(context, key)?.let { return it }
-        return loadFresh(context, target, user).also { writeDisk(context, key, it) }
+        packFailed.set(false)
+        val fresh = loadFresh(context, target, user)
+        // Only save complete results: not when the app couldn't be found (paused work profile,
+        // mid-install) or the icon pack was busy.
+        if (fresh.bitmap != null && fresh.label.toString() != target.packageName && !packFailed.get()) writeDisk(context, key, fresh)
+        return fresh
     }
 
     private fun loadFresh(context: Context, target: ComponentName, user: UserHandle): Icon {

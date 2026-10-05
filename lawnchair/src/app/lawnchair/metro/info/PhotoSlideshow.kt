@@ -25,7 +25,10 @@ class PhotoSlideshow(private val view: View) {
     private val visible = android.graphics.Rect()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val m = Matrix()
-    private val shaders = java.util.WeakHashMap<Bitmap, BitmapShader>()
+    /** Shaders for the current and next photo only, so earlier photos can be freed. */
+    private val shaders = object : java.util.LinkedHashMap<Bitmap, BitmapShader>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Bitmap, BitmapShader>?) = size > 2
+    }
 
     private var uris: List<Uri> = emptyList()
     private var index = 0

@@ -50,6 +50,8 @@ data class LiveInfo(
     /** Media session controls, for play/pause and skip on wide and large music tiles. */
     val controller: MediaController? = null,
     val isPlaying: Boolean = false,
+    /** Notifications the Start panel can show (calls left out). */
+    val panelCount: Int = 0,
 )
 
 /**
@@ -137,6 +139,7 @@ object LiveTileData {
                     pkg, count, first?.title, first?.text, first?.image,
                     items = items,
                     latestTime = list.maxOf { it.postTime },
+                    panelCount = list.count { !isCall(it) },
                 )
             }
 
@@ -236,7 +239,7 @@ object LiveTileData {
     fun hasPanelContent(pkg: String): Boolean {
         // From the snapshot already in memory: no call to Android on every touch.
         val info = snapshot[pkg] ?: return false
-        return info.count > 0 && !info.isMusic && info.items.isNotEmpty()
+        return info.panelCount > 0 && !info.isMusic
     }
 
     /** Dismisses a notification everywhere, including the notification shade. */

@@ -61,7 +61,7 @@ object PhotoQuality {
     }
 
     private fun analyse(context: Context, uri: Uri): Result? {
-        val thumb = thumbnail(context, uri) ?: return null
+        val thumb = thumbnail(context, uri) ?: error("unreadable for now") // not remembered: retried later
         val landscape = thumb.width > thumb.height * 1.1f
         val small = Bitmap.createScaledBitmap(thumb, SIDE, SIDE, true)
         val px = IntArray(SIDE * SIDE)

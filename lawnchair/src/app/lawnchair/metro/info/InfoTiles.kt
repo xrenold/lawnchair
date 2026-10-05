@@ -88,6 +88,8 @@ object InfoTiles {
     private val locationExecutor = Executors.newSingleThreadExecutor()
     /** Weather waits on location and the network; kept off [worker] so calendar and photos don't queue. */
     private val weatherWorker = Executors.newSingleThreadExecutor()
+    /** Photo scoring can take a few seconds the first time; it never delays the calendar. */
+    private val photoWorker = Executors.newSingleThreadExecutor()
     private var calendarObserving = false
     private val main = Handler(Looper.getMainLooper())
     private val listeners = mutableListOf<() -> Unit>()
@@ -302,7 +304,7 @@ object InfoTiles {
     fun refreshPhotos() {
         val app = appContext ?: return
         if (!hasPhotoAccess(app)) return
-        worker.execute {
+        photoWorker.execute {
             photos = runCatching { queryPhotos(app) }.getOrDefault(photos)
             notifyChanged()
         }

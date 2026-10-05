@@ -3,6 +3,7 @@ package app.lawnchair.metro.start
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Path
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
@@ -11,17 +12,21 @@ import app.lawnchair.metro.data.TileSize
 /**
  * Lays out [TileView]s on the Windows Phone grid.
  *
- * The grid is [columns] small-tile cells wide. Tiles are placed in list order, each at the
- * first free spot scanning top-to-bottom, left-to-right, so the Start screen never has gaps
- * that the user didn't create. As on Windows Phone, tiles two or more cells wide only start
- * on even columns and rows, keeping medium tiles lined up in 2×2 blocks.
+ * The grid is [columns] small-tile cells wide and runs edge to edge. Tiles are placed in list
+ * order, each at the first free spot scanning top-to-bottom, left-to-right, so the Start screen
+ * never has gaps the user didn't create. As on Windows Phone, tiles two or more cells wide only
+ * start on even columns and rows, keeping medium tiles lined up in 2×2 blocks.
+ *
+ * An optional [footer] (the app-list arrow) sits below the last tile, so it only comes into
+ * view at the end of the list, as on Windows Phone.
  */
 class TileGridView(context: Context) : ViewGroup(context) {
 
     /**
      * Windows Phone 8.1 window mode: everything except the tiles is painted black, so the
      * fixed wallpaper only shows through the tiles. The mask is drawn here, in the same view
-     * as the tiles, so it scrolls with them in lockstep and is only redrawn on layout.
+     * as the tiles, so it scrolls with them in lockstep. Each hole takes the tile's current
+     * transform, so when a tile flips or is pressed, the window itself flips and shrinks.
      */
     var windowMode = false
         set(value) {
@@ -36,31 +41,53 @@ class TileGridView(context: Context) : ViewGroup(context) {
             requestLayout()
         }
 
-    private val gutter = dp(5f).toInt()
-    private val sideMargin = dp(12f).toInt()
-    /** Space after the last tile so the app-list arrow never covers it. */
-    var bottomPadding = dp(96f).toInt()
-    var topPadding = dp(36f).toInt()
+    /** Shown under the last tile, right-aligned. */
+    var footer: View? = null
+        set(value) {
+            field?.let { removeView(it) }
+            field = value
+            value?.let { addView(it) }
+        }
+    var footerSize = dp(44f).toInt()
+    private val footerMargin = dp(20f).toInt()
 
-    /** Cell positions from the last layout pass, parallel to child order: [col, row]. */
+    private val gutter = dp(5f).toInt()
+    var topPadding = dp(36f).toInt()
+    /** Bottom system inset (gesture bar), kept clear below the footer. */
+    var bottomInset = 0
+
+    /** Cell positions from the last layout pass, parallel to [tiles]: [col, row]. */
     private var positions = IntArray(0)
     private var cellSize = 0
+    private var contentBottom = 0
+
+    private val holePath = Path()
+    private val tileRectPath = Path()
+
+    private val tiles: List<TileView>
+        get() = (0 until childCount).mapNotNull { getChildAt(it) as? TileView }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
-        cellSize = ((width - sideMargin * 2 - gutter * (columns - 1)) / columns).coerceAtLeast(1)
+        cellSize = ((width - gutter * (columns - 1)) / columns).coerceAtLeast(1)
 
-        val rows = pack()
-        for (i in 0 until childCount) {
-            val child = getChildAt(i)
-            val size = sizeOf(child)
+        val tileViews = tiles
+        val rows = pack(tileViews)
+        for (child in tileViews) {
+            val size = child.tile.size
             val span = size.span.coerceAtMost(columns)
             val w = span * cellSize + (span - 1) * gutter
             val h = size.rowSpan * cellSize + (size.rowSpan - 1) * gutter
             child.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
         }
+        footer?.measure(
+            MeasureSpec.makeMeasureSpec(footerSize, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(footerSize, MeasureSpec.EXACTLY),
+        )
         val contentHeight = if (rows == 0) 0 else rows * cellSize + (rows - 1) * gutter
-        var height = topPadding + contentHeight + bottomPadding
+        contentBottom = topPadding + contentHeight
+        val footerSpace = if (footer != null) footerMargin * 2 + footerSize else dp(24f).toInt()
+        var height = contentBottom + footerSpace + bottomInset
         // ScrollView's fillViewport passes the screen height; never be shorter than that, so the
         // window-mode mask always covers the whole screen.
         if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) {
@@ -70,33 +97,44 @@ class TileGridView(context: Context) : ViewGroup(context) {
     }
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        for (i in 0 until childCount) {
-            val child = getChildAt(i)
-            val col = positions[i * 2]
-            val row = positions[i * 2 + 1]
-            val left = sideMargin + col * (cellSize + gutter)
-            val top = topPadding + row * (cellSize + gutter)
+        tiles.forEachIndexed { i, child ->
+            val left = positions[i * 2] * (cellSize + gutter)
+            val top = topPadding + positions[i * 2 + 1] * (cellSize + gutter)
             child.layout(left, top, left + child.measuredWidth, top + child.measuredHeight)
+        }
+        footer?.let {
+            val right = width - footerMargin
+            val top = contentBottom + footerMargin
+            it.layout(right - footerSize, top, right, top + footerSize)
         }
         if (windowMode) invalidate() // tile holes moved
     }
 
     override fun onDraw(canvas: Canvas) {
         if (!windowMode) return
-        val save = canvas.save()
-        for (i in 0 until childCount) {
-            val c = getChildAt(i)
-            if (c.visibility == View.VISIBLE) {
-                canvas.clipOutRect(c.left, c.top, c.right, c.bottom)
+        holePath.rewind()
+        for (c in tiles) {
+            if (c.visibility != View.VISIBLE) continue
+            if (c.matrix.isIdentity) {
+                holePath.addRect(c.left.toFloat(), c.top.toFloat(), c.right.toFloat(), c.bottom.toFloat(), Path.Direction.CW)
+            } else {
+                // Flipping or pressed: cut the hole in the tile's projected (3D-rotated) shape.
+                tileRectPath.rewind()
+                tileRectPath.addRect(0f, 0f, c.width.toFloat(), c.height.toFloat(), Path.Direction.CW)
+                tileRectPath.transform(c.matrix)
+                tileRectPath.offset(c.left.toFloat(), c.top.toFloat())
+                holePath.addPath(tileRectPath)
             }
         }
+        val save = canvas.save()
+        canvas.clipOutPath(holePath)
         canvas.drawColor(Color.BLACK)
         canvas.restoreToCount(save)
     }
 
-    /** Places every child; returns the number of rows used. */
-    private fun pack(): Int {
-        positions = IntArray(childCount * 2)
+    /** Places every tile; returns the number of rows used. */
+    private fun pack(tileViews: List<TileView>): Int {
+        positions = IntArray(tileViews.size * 2)
         val occupied = ArrayList<BooleanArray>()
         fun rowAt(r: Int): BooleanArray {
             while (occupied.size <= r) occupied += BooleanArray(columns)
@@ -112,8 +150,8 @@ class TileGridView(context: Context) : ViewGroup(context) {
         }
 
         var usedRows = 0
-        for (i in 0 until childCount) {
-            val size = sizeOf(getChildAt(i))
+        tileViews.forEachIndexed { i, view ->
+            val size = view.tile.size
             val span = size.span.coerceAtMost(columns)
             val rowSpan = size.rowSpan
             val aligned = span >= 2
@@ -141,17 +179,6 @@ class TileGridView(context: Context) : ViewGroup(context) {
             }
         }
         return usedRows
-    }
-
-    private fun sizeOf(child: View): TileSize = (child as? TileView)?.tile?.size ?: TileSize.MEDIUM
-
-    /** Bounds of every laid-out tile, in this view's coordinates (used for window mode). */
-    fun forEachTileBounds(block: (left: Float, top: Float, right: Float, bottom: Float) -> Unit) {
-        for (i in 0 until childCount) {
-            val c = getChildAt(i)
-            if (c.visibility != View.VISIBLE) continue
-            block(c.left.toFloat(), c.top.toFloat(), c.right.toFloat(), c.bottom.toFloat())
-        }
     }
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)

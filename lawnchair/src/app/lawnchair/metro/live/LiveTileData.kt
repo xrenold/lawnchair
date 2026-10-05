@@ -14,6 +14,14 @@ import android.service.notification.StatusBarNotification
 import com.android.launcher3.notification.NotificationListener
 import java.util.concurrent.Executors
 
+/** One message or notification shown on a live tile. */
+data class LiveItem(
+    val title: CharSequence?,
+    val text: CharSequence?,
+    val image: Bitmap?,
+    val time: Long,
+)
+
 /** What a live tile can show for one app. */
 data class LiveInfo(
     val packageName: String,
@@ -27,6 +35,8 @@ data class LiveInfo(
     val image: Bitmap? = null,
     /** True when [image] is album art from a playing media session. */
     val isMusic: Boolean = false,
+    /** Newest-first messages, for wide and large tiles that show several at once. */
+    val items: List<LiveItem> = emptyList(),
 )
 
 /**
@@ -97,23 +107,15 @@ object LiveTileData {
         val byPackage = HashMap<String, LiveInfo>()
         active
             .filter { isUserFacing(it) }
-            .sortedByDescending { it.postTime }
-            .forEach { sbn ->
-                val pkg = sbn.packageName
-                val prev = byPackage[pkg]
-                val number = sbn.notification.number.takeIf { it > 0 } ?: 1
-                if (prev == null) {
-                    val extras = sbn.notification.extras
-                    val title = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)
-                        ?: extras.getCharSequence(Notification.EXTRA_TITLE)
-                    val text = lastMessageText(sbn.notification)
-                        ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
-                        ?: extras.getCharSequence(Notification.EXTRA_TEXT)
-                    val image = sbn.notification.getLargeIcon()?.let { loadIcon(context, it) }
-                    byPackage[pkg] = LiveInfo(pkg, number, title, text, image)
-                } else {
-                    byPackage[pkg] = prev.copy(count = prev.count + number)
-                }
+            .groupBy { it.packageName }
+            .forEach { (pkg, list) ->
+                val count = list.sumOf { sbn -> sbn.notification.number.takeIf { it > 0 } ?: 1 }
+                val items = list
+                    .flatMap { sbn -> itemsOf(context, sbn) }
+                    .sortedByDescending { it.time }
+                    .take(MAX_ITEMS)
+                val first = items.firstOrNull()
+                byPackage[pkg] = LiveInfo(pkg, count, first?.title, first?.text, first?.image, items = items)
             }
 
         // Music: the playing media session's artwork and track, replacing that app's message info.
@@ -137,6 +139,37 @@ object LiveTileData {
         return byPackage
     }
 
+    private const val MAX_ITEMS = 6
+
+    /**
+     * Messages in a notification: each message of a chat (MessagingStyle) separately, with
+     * its sender, or the notification's title and text otherwise.
+     */
+    private fun itemsOf(context: Context, sbn: StatusBarNotification): List<LiveItem> {
+        val n = sbn.notification
+        val extras = n.extras
+        val picture = runCatching { n.getLargeIcon()?.let { loadIcon(context, it) } }.getOrNull()
+        val conversation = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)
+        val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        if (!messages.isNullOrEmpty()) {
+            return messages.takeLast(MAX_ITEMS).mapNotNull { m ->
+                val b = m as? android.os.Bundle ?: return@mapNotNull null
+                val text = b.getCharSequence("text") ?: return@mapNotNull null
+                val sender = b.getCharSequence("sender")
+                    ?: (b.getParcelable<android.app.Person>("sender_person"))?.name
+                val title = when {
+                    conversation != null && sender != null -> "$sender · $conversation"
+                    else -> sender ?: conversation ?: extras.getCharSequence(Notification.EXTRA_TITLE)
+                }
+                LiveItem(title, text, picture, b.getLong("time", sbn.postTime))
+            }
+        }
+        val title = conversation ?: extras.getCharSequence(Notification.EXTRA_TITLE)
+        val text = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+            ?: extras.getCharSequence(Notification.EXTRA_TEXT)
+        return listOf(LiveItem(title, text, picture, sbn.postTime))
+    }
+
     /** Ignore ongoing, silent-summary and media-style notifications when counting. */
     private fun isUserFacing(sbn: StatusBarNotification): Boolean {
         val n = sbn.notification
@@ -146,12 +179,6 @@ object LiveTileData {
         if (n.category == Notification.CATEGORY_TRANSPORT || n.category == Notification.CATEGORY_PROGRESS) return false
         return n.extras.getCharSequence(Notification.EXTRA_TITLE) != null ||
             n.extras.getCharSequence(Notification.EXTRA_TEXT) != null
-    }
-
-    private fun lastMessageText(n: Notification): CharSequence? {
-        val messages = n.extras.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return null
-        val last = messages.lastOrNull() as? android.os.Bundle ?: return null
-        return last.getCharSequence("text")
     }
 
     private fun loadIcon(context: Context, icon: Icon): Bitmap? = runCatching {

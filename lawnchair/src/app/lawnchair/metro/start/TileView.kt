@@ -30,6 +30,7 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import androidx.dynamicanimation.animation.DynamicAnimation
 import androidx.dynamicanimation.animation.SpringAnimation
 import androidx.dynamicanimation.animation.SpringForce
@@ -37,6 +38,7 @@ import androidx.core.graphics.ColorUtils
 import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.TileSize
 import app.lawnchair.metro.live.LiveInfo
+import app.lawnchair.metro.live.LiveItem
 import app.lawnchair.metro.theme.MetroTheme
 import app.lawnchair.preferences.PreferenceManager
 import java.util.concurrent.Executors
@@ -121,8 +123,11 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     private val scrimPaint = Paint()
     private val avatarPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val shaderMatrix = Matrix()
-    private var backLayouts: Pair<StaticLayout?, StaticLayout?>? = null
+    /** Laid-out text for the back face; rebuilt when content or size changes. */
+    private var backLayouts: List<BackRow>? = null
     private var backLayoutsWidth = 0
+
+    private class BackRow(val title: StaticLayout?, val body: StaticLayout?, val image: Bitmap?)
 
     init {
         isClickable = true
@@ -140,7 +145,10 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         invalidate()
     }
 
-    fun refreshColors() = invalidate()
+    fun refreshColors() {
+        backLayouts = null // text colours are baked into the cached layouts
+        invalidate()
+    }
 
     private fun loadIconAsync() {
         val target = tile.component
@@ -245,8 +253,12 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     }
 
     /**
-     * Back face. Music: album art fills the tile with the track over a dark fade. Messages: the
-     * sender in large light type and the message below, in Windows Phone's typographic style.
+     * Back face.
+     *  - Music: album art fills the tile, track and artist over a dark fade.
+     *  - Messages: newest first. Medium tiles show one message with the sender in light type;
+     *    wide and large tiles list several, each with the sender's picture.
+     * The bottom row always shows the app's icon and name (and the count), so the tile stays
+     * identifiable while flipped.
      */
     private fun drawBack(canvas: Canvas) {
         val info = live ?: return
@@ -255,95 +267,168 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         val pad = dp(10f)
 
         val art = info.image
+        val onColor: Int
         if (info.isMusic && art != null) {
             drawCover(canvas, art, 0f, 0f, w, h)
-            scrimPaint.shader = LinearGradient(0f, h * 0.45f, 0f, h, 0x00000000, 0xCC000000.toInt(), Shader.TileMode.CLAMP)
-            canvas.drawRect(0f, h * 0.45f, w, h, scrimPaint)
-            ensureBackLayouts(info, w - pad * 2, Color.WHITE, music = true)
+            scrimPaint.shader = LinearGradient(0f, h * 0.4f, 0f, h, 0x00000000, 0xD0000000.toInt(), Shader.TileMode.CLAMP)
+            canvas.drawRect(0f, h * 0.4f, w, h, scrimPaint)
+            onColor = Color.WHITE
         } else {
-            val onColor = drawFill(canvas)
-            ensureBackLayouts(info, w - pad * 2, onColor, music = false)
+            onColor = drawFill(canvas)
         }
+        headPaint.color = onColor
+        bodyPaint.color = onColor
 
-        val (head, body) = backLayouts ?: return
-        canvas.save()
+        // Footer: app icon + name, count on the right.
+        val footerIcon = dp(16f)
+        val footerBaseline = h - pad - labelPaint.descent()
+        val footerTop = h - pad - footerIcon
+        icon?.let { bmp ->
+            val s = footerIcon / maxOf(bmp.width, bmp.height)
+            val iw = bmp.width * s
+            val ih = bmp.height * s
+            iconRect.set(pad, footerTop + (footerIcon - ih) / 2f, pad + iw, footerTop + (footerIcon + ih) / 2f)
+            iconPaint.colorFilter = if (iconIsMonochrome) PorterDuffColorFilter(onColor, PorterDuff.Mode.SRC_IN) else null
+            canvas.drawBitmap(bmp, null, iconRect, iconPaint)
+        }
+        val labelX = pad + footerIcon + dp(6f)
+        var countW = 0f
+        if (info.count > 0 && !info.isMusic) {
+            countPaint.textSize = sp(13f)
+            countPaint.color = onColor
+            val t = countLabel(info.count)
+            countW = countPaint.measureText(t) + dp(6f)
+            canvas.drawText(t, w - pad - countPaint.measureText(t), footerBaseline, countPaint)
+        }
+        labelPaint.color = onColor
+        val labelText = TextUtils.ellipsize(label, labelPaint, w - labelX - pad - countW, TextUtils.TruncateAt.END)
+        canvas.drawText(labelText, 0, labelText.length, labelX, footerBaseline, labelPaint)
+
+        // Content area above the footer.
+        val contentTop = pad
+        val contentBottom = footerTop - dp(8f)
+        val rows = ensureBackLayouts(info, (w - pad * 2).toInt())
+        if (rows.isEmpty()) return
+
         if (info.isMusic) {
-            // Bottom-aligned: track title then artist.
-            val total = (head?.height ?: 0) + (body?.height ?: 0)
-            canvas.translate(pad, h - pad - total)
-        } else {
-            var left = pad
-            var top = pad
-            if (art != null && tile.size == TileSize.WIDE) {
-                // Wide tiles: sender picture on the left, text beside it.
-                val a = wideAvatarSize()
-                drawCover(canvas, art, pad, pad, pad + a, pad + a, paint = avatarPaint)
-                left += a + dp(10f)
-            } else if (art != null) {
-                val a = dp(36f)
-                drawCover(canvas, art, pad, pad, pad + a, pad + a, paint = avatarPaint)
-                top += a + dp(6f)
-            }
-            canvas.translate(left, top)
+            // Bottom-aligned above the footer: track title, then artist.
+            val row = rows.first()
+            val total = (row.title?.height ?: 0) + (row.body?.height ?: 0)
+            canvas.save()
+            canvas.translate(pad, contentBottom - total)
+            row.title?.draw(canvas)
+            canvas.translate(0f, (row.title?.height ?: 0).toFloat())
+            row.body?.draw(canvas)
+            canvas.restore()
+            return
         }
-        head?.draw(canvas)
-        canvas.translate(0f, (head?.height ?: 0).toFloat())
-        body?.draw(canvas)
-        canvas.restore()
 
-        // App name stays in the corner so you always know which tile it is.
-        if (!info.isMusic) {
-            labelPaint.color = bodyPaint.color
-            val text = TextUtils.ellipsize(label, labelPaint, w - pad * 2 - dp(24f), TextUtils.TruncateAt.END)
-            canvas.drawText(text, 0, text.length, dp(8f), h - dp(8f) - labelPaint.descent(), labelPaint)
-            if (info.count > 0) {
-                countPaint.textSize = sp(13f)
-                countPaint.color = bodyPaint.color
-                val t = countLabel(info.count)
-                canvas.drawText(t, w - dp(8f) - countPaint.measureText(t), h - dp(8f) - countPaint.descent(), countPaint)
+        if (tile.size == TileSize.MEDIUM) {
+            // One message: picture and sender on top, the message below.
+            val row = rows.first()
+            var y = contentTop
+            val avatar = dp(40f)
+            if (row.image != null) {
+                drawCover(canvas, row.image, pad, y, pad + avatar, y + avatar, paint = avatarPaint)
+                canvas.save()
+                canvas.translate(pad + avatar + dp(8f), y + (avatar - (row.title?.height ?: 0)) / 2f)
+                row.title?.draw(canvas)
+                canvas.restore()
+                y += avatar + dp(6f)
+            } else {
+                canvas.save()
+                canvas.translate(pad, y)
+                row.title?.draw(canvas)
+                canvas.restore()
+                y += (row.title?.height ?: 0) + dp(2f)
             }
+            row.body?.let { body ->
+                canvas.save()
+                canvas.translate(pad, y)
+                canvas.clipRect(0f, 0f, w - pad * 2, contentBottom - y)
+                body.draw(canvas)
+                canvas.restore()
+            }
+            return
+        }
+
+        // Wide and large: a list of messages, as many as fit.
+        val avatar = rowAvatarSize()
+        var y = contentTop
+        for (row in rows) {
+            val textH = (row.title?.height ?: 0) + (row.body?.height ?: 0)
+            val rowH = maxOf(if (row.image != null) avatar else 0f, textH.toFloat())
+            if (y + rowH > contentBottom) break
+            var x = pad
+            if (row.image != null) {
+                drawCover(canvas, row.image, pad, y, pad + avatar, y + avatar, paint = avatarPaint)
+                x += avatar + dp(8f)
+            }
+            canvas.save()
+            canvas.translate(x, y)
+            row.title?.draw(canvas)
+            canvas.translate(0f, (row.title?.height ?: 0).toFloat())
+            row.body?.draw(canvas)
+            canvas.restore()
+            y += rowH + dp(8f)
         }
     }
 
-    private fun ensureBackLayouts(info: LiveInfo, width: Float, color: Int, music: Boolean) {
-        val wInt = width.toInt().coerceAtLeast(1)
-        headPaint.color = color
-        bodyPaint.color = color
-        if (backLayouts != null && backLayoutsWidth == wInt) return
+    private fun rowAvatarSize() = if (tile.size == TileSize.LARGE) dp(40f) else dp(34f)
+
+    private fun ensureBackLayouts(info: LiveInfo, width: Int): List<BackRow> {
+        val wInt = width.coerceAtLeast(1)
+        backLayouts?.let { if (backLayoutsWidth == wInt) return it }
         backLayoutsWidth = wInt
-        val cell = height.toFloat() / tile.size.rowSpan
-        val textWidth = if (!music && info.image != null && tile.size == TileSize.WIDE) {
-            (wInt - wideAvatarSize() - dp(10f)).toInt().coerceAtLeast(1)
-        } else {
-            wInt
-        }
-        val headLines: Int
-        val bodyLines: Int
-        if (music) {
+
+        val rows: List<BackRow> = if (info.isMusic) {
             headPaint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            headPaint.textSize = sp(15f)
+            headPaint.textSize = sp(if (tile.size == TileSize.MEDIUM) 15f else 17f)
             bodyPaint.textSize = sp(13f)
-            headLines = 2
-            bodyLines = 1
-        } else {
+            listOf(
+                BackRow(
+                    info.title?.let { layout(it, headPaint, wInt, 2) },
+                    info.text?.let { layout(it, bodyPaint, wInt, 1) },
+                    null,
+                ),
+            )
+        } else if (tile.size == TileSize.MEDIUM) {
+            val item = info.items.firstOrNull()
             headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            headPaint.textSize = (cell * 0.24f).coerceIn(sp(16f), sp(26f))
-            bodyPaint.textSize = sp(14f)
-            headLines = 1
-            bodyLines = when (tile.size) {
-                TileSize.LARGE -> 7
-                TileSize.WIDE -> 3
-                else -> if (info.image != null) 2 else 3
+            headPaint.textSize = sp(17f)
+            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.textSize = sp(13f)
+            val titleWidth = if (item?.image != null) (wInt - dp(48f)).toInt() else wInt
+            listOf(
+                BackRow(
+                    (item?.title ?: info.title)?.let { layout(it, headPaint, titleWidth.coerceAtLeast(1), 2) },
+                    (item?.text ?: info.text)?.let { layout(it, bodyPaint, wInt, 4) },
+                    item?.image ?: info.image,
+                ),
+            )
+        } else {
+            // List rows: sender in a heavier weight, message in regular.
+            headPaint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            headPaint.textSize = sp(14f)
+            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.textSize = sp(13f)
+            val bodyLines = if (tile.size == TileSize.LARGE) 2 else 1
+            val items = info.items.ifEmpty { listOf(LiveItem(info.title, info.text, info.image, 0L)) }
+            items.map { item ->
+                val textW = if (item.image != null) (wInt - rowAvatarSize() - dp(8f)).toInt() else wInt
+                BackRow(
+                    item.title?.let { layout(it, headPaint, textW.coerceAtLeast(1), 1) },
+                    item.text?.let { layout(it, bodyPaint, textW.coerceAtLeast(1), bodyLines) },
+                    item.image,
+                )
             }
         }
-        backLayouts = Pair(
-            info.title?.let { layout(it, headPaint, textWidth, headLines) },
-            info.text?.let { layout(it, bodyPaint, textWidth, bodyLines) },
-        )
+        backLayouts = rows
+        return rows
     }
 
     private fun layout(text: CharSequence, paint: TextPaint, width: Int, maxLines: Int): StaticLayout =
-        StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+        StaticLayout.Builder.obtain(text, 0, text.length, TextPaint(paint), width)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setEllipsize(TextUtils.TruncateAt.END)
             .setMaxLines(maxLines)
@@ -362,8 +447,6 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         paint.shader = null
     }
 
-    private fun wideAvatarSize() = height - dp(20f) - labelPaint.textSize - dp(6f)
-
     private fun countLabel(count: Int) = if (count > 99) "99+" else count.toString()
 
     /**
@@ -380,17 +463,32 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         cameraDistance = 9000f * resources.displayMetrics.density
         pivotX = width / 2f
         pivotY = height / 2f
-        animate().rotationX(90f).setDuration(180).setInterpolator(AccelerateInterpolator(1.8f)).withEndAction {
-            showingBack = !showingBack
-            invalidate()
-            rotationX = -90f
-            flipSpring = SpringAnimation(this, DynamicAnimation.ROTATION_X, 0f).apply {
-                spring.stiffness = 520f
-                spring.dampingRatio = 0.62f
-                addEndListener { _, _, _, _ -> flipping = false }
-                start()
-            }
-        }.start()
+        animate().rotationX(90f).setDuration(180).setInterpolator(AccelerateInterpolator(1.8f))
+            .setUpdateListener { syncWindow() }
+            .withEndAction {
+                showingBack = !showingBack
+                invalidate()
+                rotationX = -90f
+                syncWindow()
+                flipSpring = SpringAnimation(this, DynamicAnimation.ROTATION_X, 0f).apply {
+                    spring.stiffness = 520f
+                    spring.dampingRatio = 0.62f
+                    addUpdateListener { _, _, _ -> syncWindow() }
+                    addEndListener { _, _, _, _ ->
+                        flipping = false
+                        syncWindow()
+                    }
+                    start()
+                }
+            }.start()
+    }
+
+    /**
+     * In window mode the hole in the black mask must follow this tile's rotation and scale,
+     * so the "window" itself flips or sinks rather than just its content.
+     */
+    private fun syncWindow() {
+        if (windowMode) (parent as? View)?.invalidate()
     }
 
     /** Snaps back to the front face immediately (e.g. when Start is left). */
@@ -409,9 +507,11 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> animate().scaleX(0.96f).scaleY(0.96f).setDuration(90).start()
+            MotionEvent.ACTION_DOWN -> animate().scaleX(0.96f).scaleY(0.96f).setDuration(90)
+                .setInterpolator(DecelerateInterpolator()).setUpdateListener { syncWindow() }.start()
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+                animate().scaleX(1f).scaleY(1f).setDuration(120)
+                    .setInterpolator(DecelerateInterpolator()).setUpdateListener { syncWindow() }.start()
         }
         return super.onTouchEvent(event)
     }

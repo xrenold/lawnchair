@@ -75,7 +75,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             val start = e1 ?: return false
             val dx = e2.x - start.x
             val dy = e2.y - start.y
-            if (dx < -dp(80f) && abs(dx) > abs(dy) * 1.5f && abs(vx) > dp(300f)) {
+            // Right-to-left swipe: open the app list.
+            if (dx < -dp(60f) && abs(dx) > abs(dy) * 1.3f && vx < -dp(250f)) {
                 openAppList()
                 return true
             }
@@ -111,8 +112,12 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         scroller.addView(grid, ViewGroup.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(scroller, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
+        // The app-list arrow scrolls with the tiles and only shows at the end of Start.
         setupArrow()
-        addView(arrow, LayoutParams(dp(44f).toInt(), dp(44f).toInt(), Gravity.BOTTOM or Gravity.END))
+        grid.footer = arrow
+
+        // Pulling down past the top opens the notification shade.
+        scroller.onPullPastTop = { openNotifications() }
 
         reload()
     }
@@ -120,12 +125,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** Status bar and gesture bar insets, delivered by Launcher's DragLayer. */
     override fun setInsets(insets: Rect) {
         grid.topPadding = insets.top + dp(24f).toInt()
-        grid.bottomPadding = insets.bottom + dp(96f).toInt()
-        (arrow.layoutParams as LayoutParams).apply {
-            rightMargin = dp(16f).toInt()
-            bottomMargin = insets.bottom + dp(20f).toInt()
-        }
-        arrow.requestLayout()
+        grid.bottomInset = insets.bottom
         grid.requestLayout()
     }
 
@@ -165,8 +165,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** Re-reads tiles from storage and rebuilds the grid. */
     fun reload() {
         tiles = store.load()
-        grid.removeAllViews()
-        tiles.forEach { grid.addView(createTileView(it)) }
+        // Remove tiles only; the grid also holds the app-list arrow.
+        (0 until grid.childCount).map { grid.getChildAt(it) }.filterIsInstance<TileView>().forEach(grid::removeView)
+        tiles.forEach { grid.addView(createTileView(it), grid.childCount - if (grid.footer != null) 1 else 0) }
         applyLive(LiveTileData.snapshot)
         invalidate()
     }
@@ -303,13 +304,30 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         launcher.stateManager.goToState(LauncherState.ALL_APPS)
     }
 
-    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+    // Watched here rather than in onInterceptTouchEvent: once the tiles start scrolling, the
+    // scroller blocks interception, which would hide a sideways swipe from us.
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             lastTouchX = ev.x
             lastTouchY = ev.y
         }
-        swipeDetector.onTouchEvent(ev)
-        return super.onInterceptTouchEvent(ev)
+        if (swipeDetector.onTouchEvent(ev)) {
+            // Swipe handled: cancel whatever the tiles were doing with this gesture.
+            val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+            super.dispatchTouchEvent(cancel)
+            cancel.recycle()
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /** Expands the notification shade (Android lets launchers do this; no extra permission prompt). */
+    @SuppressLint("WrongConstant")
+    private fun openNotifications() {
+        runCatching {
+            val sbm = launcher.getSystemService("statusbar")
+            Class.forName("android.app.StatusBarManager").getMethod("expandNotificationsPanel").invoke(sbm)
+        }
     }
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)

@@ -24,6 +24,9 @@ import kotlin.math.sign
 @SuppressLint("ViewConstructor")
 class BounceScrollView(context: Context) : ScrollView(context) {
 
+    /** Called when the user pulls far enough past the top and lets go. */
+    var onPullPastTop: (() -> Unit)? = null
+
     /** Called with the current scroll fraction (0 = top, 1 = bottom) on every scroll change. */
     var onScrollFraction: ((Float) -> Unit)? = null
 
@@ -80,6 +83,9 @@ class BounceScrollView(context: Context) : ScrollView(context) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 touching = false
+                if (ev.actionMasked == MotionEvent.ACTION_UP && offset > maxOffset * 0.45f) {
+                    onPullPastTop?.invoke()
+                }
                 if (offset != 0f) {
                     spring.setStartValue(offset)
                     spring.setStartVelocity(0f)

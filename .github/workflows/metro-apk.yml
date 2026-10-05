@@ -44,7 +44,17 @@ jobs:
           cp metro/debug.keystore ~/.android/debug.keystore
 
       - name: Build APK
-        run: ./gradlew assembleLawnWithQuickstepGithubDebug --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew assembleLawnWithQuickstepGithubDebug --stacktrace 2>&1 | tee build.log
+
+      # Surface compiler errors as annotations, readable without downloading the log.
+      - name: Report build errors
+        if: failure()
+        run: |
+          grep -E "^e: |error:|\.(kt|java):[0-9]+: error" build.log | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

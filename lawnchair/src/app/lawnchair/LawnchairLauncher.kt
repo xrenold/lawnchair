@@ -357,7 +357,6 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun onStateBack() {
-        if (metroAppList?.onBack() == true) return
         val searchInput = mAppsView?.searchUiManager?.editText
         val isSearching = mAppsView?.isSearching == true || searchInput?.hasFocus() == true
         if (isSearching) {

@@ -24,7 +24,11 @@ import java.util.concurrent.Executors
  */
 object MetroIcons {
 
-    class Icon(val bitmap: Bitmap?, val monochrome: Boolean, val label: CharSequence)
+    /**
+     * [brandColor] is the most prominent saturated colour of the app's full-colour icon
+     * (WhatsApp green, Spotify green, X blue…), or 0 when the icon has no clear colour.
+     */
+    class Icon(val bitmap: Bitmap?, val monochrome: Boolean, val label: CharSequence, val brandColor: Int)
 
     private val cache = LruCache<String, Icon>(400)
     private val executor = Executors.newFixedThreadPool(2)
@@ -69,7 +73,49 @@ object MetroIcons {
         }
         val label = runCatching { info?.label }.getOrNull() ?: target.packageName
         val bitmap = runCatching { (mono ?: full)?.let(::renderTrimmed) }.getOrNull()
-        return Icon(bitmap, mono != null, label)
+        val brand = runCatching { full?.let(::brandColorOf) }.getOrNull() ?: 0
+        return Icon(bitmap, mono != null, label, brand)
+    }
+
+    /**
+     * Finds the icon's brand colour: bucket saturated pixels by hue, take the strongest bucket,
+     * average its colour and lift it to a bright, glow-friendly tone.
+     */
+    private fun brandColorOf(d: Drawable): Int {
+        val size = 48
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        d.setBounds(0, 0, size, size)
+        d.draw(Canvas(bmp))
+        val px = IntArray(size * size)
+        bmp.getPixels(px, 0, size, 0, 0, size, size)
+        val buckets = 24
+        val weight = FloatArray(buckets)
+        val sumR = FloatArray(buckets)
+        val sumG = FloatArray(buckets)
+        val sumB = FloatArray(buckets)
+        val hsv = FloatArray(3)
+        for (c in px) {
+            if ((c ushr 24) < 200) continue
+            android.graphics.Color.colorToHSV(c, hsv)
+            if (hsv[1] < 0.35f || hsv[2] < 0.25f) continue // greys, whites, blacks
+            val b = ((hsv[0] / 360f) * buckets).toInt().coerceIn(0, buckets - 1)
+            val w = hsv[1] * hsv[2]
+            weight[b] += w
+            sumR[b] += ((c shr 16) and 0xFF) * w
+            sumG[b] += ((c shr 8) and 0xFF) * w
+            sumB[b] += (c and 0xFF) * w
+        }
+        val best = weight.indices.maxByOrNull { weight[it] } ?: return 0
+        if (weight[best] < 20f) return 0 // too little colour to call it a brand colour
+        val avg = android.graphics.Color.rgb(
+            (sumR[best] / weight[best]).toInt(),
+            (sumG[best] / weight[best]).toInt(),
+            (sumB[best] / weight[best]).toInt(),
+        )
+        android.graphics.Color.colorToHSV(avg, hsv)
+        hsv[1] = hsv[1].coerceAtLeast(0.6f)
+        hsv[2] = hsv[2].coerceAtLeast(0.85f)
+        return android.graphics.Color.HSVToColor(hsv)
     }
 
     /** Draws [d] into a bitmap and crops away transparent padding, leaving only the artwork. */

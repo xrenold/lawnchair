@@ -223,6 +223,33 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     fun scrollToTop() = scroller.smoothScrollTo(0, 0)
 
+    private var panProgress = 0f
+
+    /**
+     * Called while the app list slides in (0 = Start, 1 = app list). The tiles slide and fade,
+     * the background photo drifts the other way and frosts over, and with the system wallpaper
+     * the wallpaper itself is nudged sideways, as on Windows Phone.
+     */
+    fun setPanProgress(p: Float) {
+        panProgress = p
+        scroller.translationX = -width * 0.3f * p
+        scroller.alpha = 1f - p
+        parallax?.let {
+            it.setPanFraction(p)
+            it.setBlur(p * dp(28f))
+        }
+        if (background == MetroTheme.BG_BLACK) {
+            // Fade the black away so the frosted wallpaper shows behind the app list.
+            setBackgroundColor(Color.argb(((1f - p) * 255).toInt(), 0, 0, 0))
+        }
+        if (parallax == null) {
+            runCatching {
+                android.app.WallpaperManager.getInstance(launcher)
+                    .setWallpaperOffsets(windowToken, 0.25f * p, 0.5f)
+            }
+        }
+    }
+
     private fun createTileView(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
         setOnClickListener { launch(this) }

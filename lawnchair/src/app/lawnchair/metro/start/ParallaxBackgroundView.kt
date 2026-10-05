@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.view.View
 import java.io.File
+import kotlin.math.abs
 
 /**
  * The Start screen's own background photo, for Windows Phone 8.1's parallax: the photo is
@@ -26,6 +27,10 @@ class ParallaxBackgroundView(context: Context) : View(context) {
 
     /** How much taller than the screen the photo is drawn, as a fraction of the height. */
     private val travel = 0.12f
+
+    /** How much wider than the screen, for the sideways drift when the app list slides in. */
+    private val travelX = 0.10f
+    private var blurRadius = 0f
 
     fun load() {
         val file = file(context)
@@ -51,11 +56,26 @@ class ParallaxBackgroundView(context: Context) : View(context) {
         translationY = -fraction * (height - height / (1 + travel))
     }
 
-    /** Taller than the screen by [travel], so there is photo left to reveal while scrolling. */
+    /** 0 on Start, 1 with the app list open: the photo drifts left as the list slides in. */
+    fun setPanFraction(fraction: Float) {
+        translationX = -fraction * (width - width / (1 + travelX))
+    }
+
+    /** Frosted-glass blur behind the app list (Android 12+). */
+    fun setBlur(radius: Float) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+        if (abs(radius - blurRadius) < 0.5f) return
+        blurRadius = radius
+        setRenderEffect(
+            if (radius < 1f) null else android.graphics.RenderEffect.createBlurEffect(radius, radius, android.graphics.Shader.TileMode.CLAMP),
+        )
+    }
+
+    /** Larger than the screen by [travel] and [travelX], so there is photo left to reveal. */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
         val h = MeasureSpec.getSize(heightMeasureSpec)
-        setMeasuredDimension(w, (h * (1 + travel)).toInt())
+        setMeasuredDimension((w * (1 + travelX)).toInt(), (h * (1 + travel)).toInt())
     }
 
     override fun onDraw(canvas: Canvas) {

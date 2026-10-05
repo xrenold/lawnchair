@@ -68,16 +68,19 @@ class TileGridView(context: Context) : ViewGroup(context) {
      * Display order of the tiles. Kept separately from child order so a tile can be moved
      * while it is being dragged (re-adding the dragged view would cancel the touch).
      */
-    private var order: List<TileView>? = null
+    private var order: List<View>? = null
 
-    val tiles: List<TileView>
+    /** App and widget tiles, in display order (excludes the footer arrow). */
+    val tiles: List<View>
         get() {
-            val children = (0 until childCount).mapNotNull { getChildAt(it) as? TileView }
+            val children = (0 until childCount).map { getChildAt(it) }.filter { it is TileHolder }
             val o = order ?: return children
             return o.filter { it.parent === this } + children.filter { it !in o }
         }
 
-    fun setOrder(views: List<TileView>) {
+    private fun View.holder() = this as TileHolder
+
+    fun setOrder(views: List<View>) {
         order = views
     }
 
@@ -106,7 +109,7 @@ class TileGridView(context: Context) : ViewGroup(context) {
         val tileViews = tiles
         val rows = pack(tileViews)
         for (child in tileViews) {
-            val size = child.tile.size
+            val size = child.holder().tile.size
             val span = size.span.coerceAtMost(columns)
             val w = span * cellSize + (span - 1) * gutter
             val h = size.rowSpan * cellSize + (size.rowSpan - 1) * gutter
@@ -161,9 +164,10 @@ class TileGridView(context: Context) : ViewGroup(context) {
         holePath.rewind()
         for (c in tiles) {
             if (c.visibility != View.VISIBLE) continue
-            if (c.lifted) {
+            val h = c.holder()
+            if (h.lifted) {
                 // Dragged tile: its window sits inside its black frame, on top of the others.
-                val b = c.liftBorder
+                val b = h.liftBorder
                 tileRectPath.rewind()
                 tileRectPath.addRect(b, b, c.width - b, c.height - b, Path.Direction.CW)
                 tileRectPath.transform(c.matrix)
@@ -187,11 +191,11 @@ class TileGridView(context: Context) : ViewGroup(context) {
     }
 
     /** Places every tile; returns the number of rows used. */
-    private fun pack(tileViews: List<TileView>): Int {
+    private fun pack(tileViews: List<View>): Int {
         positions = IntArray(tileViews.size * 2)
         val packer = app.lawnchair.metro.data.TilePacker(columns)
         tileViews.forEachIndexed { i, view ->
-            val (col, row) = packer.place(view.tile.size)
+            val (col, row) = packer.place(view.holder().tile.size)
             positions[i * 2] = col
             positions[i * 2 + 1] = row
         }

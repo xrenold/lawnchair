@@ -29,15 +29,31 @@ enum class TileSize(val span: Int, val rowSpan: Int, val label: String) {
  */
 data class MetroTile(
     val id: Long,
+    /** The app's activity; for widgets, the widget provider; for shortcuts, the owning app. */
     val component: ComponentName,
     var size: TileSize = TileSize.MEDIUM,
     /** Per-tile colour override, 0 = follow the theme. */
     var color: Int = 0,
     /** Locked tiles keep their size and spot when auto layout runs. */
     var locked: Boolean = false,
+    val kind: Kind = Kind.APP,
+    /** App shortcut id (kind SHORTCUT). */
+    val shortcutId: String? = null,
+    /** Bound widget id (kind WIDGET). */
+    val widgetId: Int = 0,
+    /** Label for shortcut tiles. */
+    val title: String? = null,
 ) {
+    enum class Kind { APP, SHORTCUT, WIDGET }
+
     /** Stable key for colour picks and icon caching. */
-    val key: String get() = component.flattenToShortString()
+    val key: String get() = when (kind) {
+        Kind.APP -> component.flattenToShortString()
+        Kind.SHORTCUT -> component.packageName + "#" + shortcutId
+        Kind.WIDGET -> "widget#$widgetId"
+    }
+
+    val isApp: Boolean get() = kind == Kind.APP
 
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -45,12 +61,23 @@ data class MetroTile(
         .put("size", size.name)
         .put("color", color)
         .put("locked", locked)
+        .put("kind", kind.name)
+        .put("shortcutId", shortcutId ?: "")
+        .put("widgetId", widgetId)
+        .put("title", title ?: "")
 
     companion object {
         fun fromJson(o: JSONObject): MetroTile? {
             val cn = ComponentName.unflattenFromString(o.optString("component")) ?: return null
             val size = runCatching { TileSize.valueOf(o.optString("size")) }.getOrDefault(TileSize.MEDIUM)
-            return MetroTile(o.optLong("id"), cn, size, o.optInt("color", 0), o.optBoolean("locked", false))
+            val kind = runCatching { Kind.valueOf(o.optString("kind")) }.getOrDefault(Kind.APP)
+            return MetroTile(
+                o.optLong("id"), cn, size, o.optInt("color", 0), o.optBoolean("locked", false),
+                kind,
+                o.optString("shortcutId").ifEmpty { null },
+                o.optInt("widgetId", 0),
+                o.optString("title").ifEmpty { null },
+            )
         }
     }
 }
@@ -81,7 +108,13 @@ class MetroTileStore(private val context: Context) {
             }
         }
         // Drop tiles whose app was uninstalled.
-        return tiles.filter { isLaunchable(it.component) }.toMutableList()
+        return tiles.filter {
+            when (it.kind) {
+                MetroTile.Kind.APP -> isLaunchable(it.component)
+                MetroTile.Kind.SHORTCUT -> isInstalled(it.component.packageName)
+                MetroTile.Kind.WIDGET -> it.widgetId != 0
+            }
+        }.toMutableList()
     }
 
     fun save(tiles: List<MetroTile>) {
@@ -101,7 +134,7 @@ class MetroTileStore(private val context: Context) {
     /** Adds an app at the end of Start, as a medium tile. Returns false if already pinned. */
     fun pin(component: ComponentName): Boolean {
         val tiles = load()
-        if (tiles.any { it.component == component }) return false
+        if (tiles.any { it.isApp && it.component == component }) return false
         tiles += MetroTile(nextId(tiles), component, TileSize.MEDIUM)
         save(tiles)
         MetroUsage.recordPinned(context, component.packageName)
@@ -109,7 +142,7 @@ class MetroTileStore(private val context: Context) {
         return true
     }
 
-    fun isPinned(component: ComponentName) = load().any { it.component == component }
+    fun isPinned(component: ComponentName) = load().any { it.isApp && it.component == component }
 
     /** Replaces all tiles (auto layout, undo) and tells Start to rebuild. */
     fun replaceAll(newTiles: List<MetroTile>) {
@@ -118,6 +151,29 @@ class MetroTileStore(private val context: Context) {
     }
 
     fun nextId(tiles: List<MetroTile>) = (tiles.maxOfOrNull { it.id } ?: 0L) + 1
+
+    private fun isInstalled(pkg: String): Boolean =
+        runCatching { context.packageManager.getApplicationInfo(pkg, 0) }.isSuccess
+
+    /** Adds an app shortcut (pinned by the app or chosen from the app list) as a tile. */
+    fun addShortcut(pkg: String, shortcutId: String, label: String?) {
+        val tiles = load()
+        if (tiles.any { it.kind == MetroTile.Kind.SHORTCUT && it.component.packageName == pkg && it.shortcutId == shortcutId }) return
+        tiles += MetroTile(
+            nextId(tiles), ComponentName(pkg, pkg), TileSize.SMALL,
+            kind = MetroTile.Kind.SHORTCUT, shortcutId = shortcutId, title = label,
+        )
+        save(tiles)
+        listeners.toList().forEach(Runnable::run)
+    }
+
+    /** Adds a bound widget as a tile. */
+    fun addWidget(provider: ComponentName, widgetId: Int, size: TileSize) {
+        val tiles = load()
+        tiles += MetroTile(nextId(tiles), provider, size, kind = MetroTile.Kind.WIDGET, widgetId = widgetId)
+        save(tiles)
+        listeners.toList().forEach(Runnable::run)
+    }
 
     private fun isLaunchable(cn: ComponentName): Boolean {
         val launcherApps = context.getSystemService(LauncherApps::class.java) ?: return true

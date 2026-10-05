@@ -29,7 +29,10 @@ import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.MetroTileStore
 import app.lawnchair.metro.data.TileSize
 import app.lawnchair.metro.auto.AutoLayout
+import app.lawnchair.metro.data.MetroShortcuts
 import app.lawnchair.metro.data.MetroUsage
+import app.lawnchair.metro.widgets.MetroWidgets
+import app.lawnchair.metro.widgets.WidgetPicker
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.live.LiveTileData
@@ -101,7 +104,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         grid.isLongClickable = true
         grid.setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            launcher.showDefaultOptions(lastTouchX, lastTouchY)
+            showStartMenu()
             true
         }
         // WP 8.1 parallax: our own background photo, drifting slower than the tiles.
@@ -166,13 +169,13 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     fun reload(animate: Boolean) {
         if (drag != null) return
         val oldSpots = if (animate) {
-            grid.tiles.associate { it.tile.component to (it.left to it.top) }
+            grid.tiles.associate { (it as TileHolder).tile.id to (it.left to it.top) }
         } else {
             emptyMap()
         }
         tiles = store.load()
         // Remove tiles only; the grid also holds the app-list arrow.
-        (0 until grid.childCount).map { grid.getChildAt(it) }.filterIsInstance<TileView>().forEach(grid::removeView)
+        grid.tiles.forEach(grid::removeView)
         val views = tiles.map { createTileView(it) }
         views.forEach { grid.addView(it, grid.childCount - if (grid.footer != null) 1 else 0) }
         grid.setOrder(views)
@@ -181,7 +184,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 override fun onPreDraw(): Boolean {
                     grid.viewTreeObserver.removeOnPreDrawListener(this)
                     views.forEachIndexed { i, v ->
-                        val old = oldSpots[v.tile.component]
+                        val old = oldSpots[(v as TileHolder).tile.id]
                         if (old != null) {
                             v.translationX = (old.first - v.left).toFloat()
                             v.translationY = (old.second - v.top).toFloat()
@@ -223,6 +226,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val visible = Rect()
         for (i in 0 until grid.childCount) {
             val tv = grid.getChildAt(i) as? TileView ?: continue
+            if (!tv.tile.isApp) continue
             val pkg = tv.tile.component.packageName
             val info = data[pkg]
             tv.live = info
@@ -335,7 +339,15 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         }
     }
 
-    private fun createTileView(tile: MetroTile) = TileView(launcher, tile).apply {
+    private fun createTileView(tile: MetroTile): View {
+        if (tile.kind == MetroTile.Kind.WIDGET) {
+            val host = MetroWidgets.createView(launcher, tile.widgetId)
+            return WidgetTileView(launcher, tile, host) { beginDrag(it) }
+        }
+        return createAppTile(tile)
+    }
+
+    private fun createAppTile(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
         setOnClickListener { startApp(this) }
         // Long-press picks the tile up: drag to move it, or let go in place for its menu.
@@ -352,36 +364,45 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         view.getGlobalVisibleRect(bounds)
         val options = ActivityOptions.makeClipRevealAnimation(view, 0, 0, view.width, view.height).toBundle()
         runCatching {
-            launcherApps.startMainActivity(view.tile.component, Process.myUserHandle(), bounds, options)
-            MetroUsage.recordLaunch(launcher, view.tile.component.packageName)
+            val t = view.tile
+            if (t.kind == MetroTile.Kind.SHORTCUT) {
+                check(MetroShortcuts.start(launcher, t.component.packageName, t.shortcutId ?: "", bounds, options))
+            } else {
+                launcherApps.startMainActivity(t.component, Process.myUserHandle(), bounds, options)
+            }
+            MetroUsage.recordLaunch(launcher, t.component.packageName)
         }.onFailure {
             Toast.makeText(launcher, "Couldn't open ${view.label}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun showTileMenu(view: TileView) {
-        val tile = view.tile
+    private fun showTileMenu(view: View) {
+        val tile = (view as TileHolder).tile
+        val isWidget = tile.kind == MetroTile.Kind.WIDGET
         val menu = PopupMenu(launcher, view, Gravity.END)
         val sizes = menu.menu.addSubMenu(Menu.NONE, MENU_RESIZE, 0, "Resize")
         TileSize.entries.forEachIndexed { i, size ->
+            if (isWidget && size == TileSize.SMALL) return@forEachIndexed // widgets need room
             sizes.add(GROUP_SIZE, i, i, size.label).setCheckable(true).isChecked = size == tile.size
         }
         sizes.setGroupCheckable(GROUP_SIZE, true, true)
 
-        val colors = menu.menu.addSubMenu(Menu.NONE, MENU_COLOR, 1, "Tile color")
-        colors.add(GROUP_COLOR, 0, 0, "Theme (automatic)")
-        MetroTheme.CLASSIC_ACCENTS.keys.forEachIndexed { i, name ->
-            colors.add(GROUP_COLOR, i + 1, i + 1, name.replaceFirstChar { it.uppercase() })
+        if (!isWidget) {
+            val colors = menu.menu.addSubMenu(Menu.NONE, MENU_COLOR, 1, "Tile color")
+            colors.add(GROUP_COLOR, 0, 0, "Theme (automatic)")
+            MetroTheme.CLASSIC_ACCENTS.keys.forEachIndexed { i, name ->
+                colors.add(GROUP_COLOR, i + 1, i + 1, name.replaceFirstChar { it.uppercase() })
+            }
         }
         menu.menu.add(Menu.NONE, MENU_LOCK, 2, if (tile.locked) "Unlock tile" else "Lock tile (auto layout keeps it)")
-        menu.menu.add(Menu.NONE, MENU_UNPIN, 3, "Unpin from Start")
-        menu.menu.add(Menu.NONE, MENU_INFO, 4, "App info")
+        menu.menu.add(Menu.NONE, MENU_UNPIN, 3, if (isWidget) "Remove widget" else "Unpin from Start")
+        if (!isWidget) menu.menu.add(Menu.NONE, MENU_INFO, 4, "App info")
 
         menu.setOnMenuItemClickListener { item ->
             when {
                 item.groupId == GROUP_SIZE -> {
                     tile.size = TileSize.entries[item.itemId]
-                    MetroUsage.recordSize(launcher, tile.component.packageName, tile.size)
+                    if (tile.isApp) MetroUsage.recordSize(launcher, tile.component.packageName, tile.size)
                     commit(view)
                 }
                 item.itemId == MENU_LOCK -> {
@@ -395,7 +416,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 item.itemId == MENU_UNPIN -> {
                     tiles.removeAll { it.id == tile.id }
                     store.save(tiles)
-                    MetroUsage.recordUnpinned(launcher, tile.component.packageName)
+                    if (tile.isApp) MetroUsage.recordUnpinned(launcher, tile.component.packageName)
+                    if (isWidget) MetroWidgets.delete(launcher, tile.widgetId)
                     grid.setOrder(grid.tiles.filter { it !== view })
                     grid.removeView(view)
                     grid.animateReflow()
@@ -415,22 +437,53 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         menu.show()
     }
 
-    private fun commit(view: TileView) {
+    private fun commit(view: View) {
         store.save(tiles)
-        view.setTileData(view.tile)
-        grid.requestLayout()
+        (view as? TileView)?.setTileData(view.tile)
+        grid.animateReflow()
         invalidate()
+    }
+
+    /** Long-press on empty Start space: add a widget, wallpaper, settings. */
+    private fun showStartMenu() {
+        val anchor = View(launcher)
+        addView(anchor, LayoutParams(1, 1).apply {
+            leftMargin = lastTouchX.toInt()
+            topMargin = lastTouchY.toInt()
+        })
+        val menu = PopupMenu(launcher, anchor)
+        menu.menu.add(0, 1, 0, "Add widget")
+        menu.menu.add(0, 2, 1, "Wallpaper")
+        menu.menu.add(0, 3, 2, "Metro settings")
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> WidgetPicker.show(launcher) { info -> MetroWidgets.add(launcher, info) }
+                2 -> runCatching {
+                    launcher.startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper"))
+                }
+                3 -> launcher.startActivity(
+                    app.lawnchair.ui.preferences.PreferenceActivity.createIntent(
+                        launcher,
+                        app.lawnchair.ui.preferences.navigation.HomeScreen,
+                    ),
+                )
+            }
+            true
+        }
+        menu.setOnDismissListener { removeView(anchor) }
+        menu.show()
     }
 
     private fun openAppList() = launcher.openMetroAppList()
 
     // ---- Drag to rearrange --------------------------------------------------------------
 
-    private class Drag(val view: TileView, val grabX: Float, val grabY: Float, val downRawX: Float, val downRawY: Float) {
+    private class Drag(val view: View, val grabX: Float, val grabY: Float, val downRawX: Float, val downRawY: Float) {
         var moved = false
         var rawX = downRawX
         var rawY = downRawY
-        var lastTarget: TileView? = null
+        var lastTarget: View? = null
+        val holder: TileHolder get() = view as TileHolder
     }
 
     private var drag: Drag? = null
@@ -439,17 +492,18 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private val scrollerLoc = IntArray(2)
 
     /** Picks [view] up: it lifts slightly and follows the finger until released. */
-    private fun beginDrag(view: TileView) {
+    private fun beginDrag(view: View) {
         if (drag != null) return
-        val d = Drag(view, view.downX, view.downY, view.downRawX, view.downRawY)
+        val h = view as TileHolder
+        val d = Drag(view, h.downX, h.downY, h.downRawX, h.downRawY)
         drag = d
         view.parent?.requestDisallowInterceptTouchEvent(true)
         grid.draggedView = view
-        view.lifted = true
+        h.lifted = true
         view.translationZ = dp(8f)
         view.animate().scaleX(1.06f).scaleY(1.06f).alpha(0.92f).setDuration(140)
             .setUpdateListener { grid.invalidate() }.start()
-        view.dragHandler = { ev -> onDragEvent(d, ev) }
+        h.dragHandler = { ev -> onDragEvent(d, ev) }
     }
 
     private fun onDragEvent(d: Drag, ev: MotionEvent): Boolean {
@@ -497,7 +551,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             gx > t.left + ix && gx < t.right - ix && gy > t.top + iy && gy < t.bottom - iy
         }
         val lastBottom = others.filter { it !== d.view }.maxOfOrNull { it.bottom } ?: 0
-        val newOrder: List<TileView>? = when {
+        val newOrder: List<View>? = when {
             target != null && target !== d.lastTarget -> {
                 val list = others.toMutableList()
                 list.remove(d.view)
@@ -513,7 +567,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         d.lastTarget = target
         if (newOrder != null && newOrder != others) {
             grid.setOrder(newOrder)
-            tiles = newOrder.map { it.tile }.toMutableList()
+            tiles = newOrder.map { (it as TileHolder).tile }.toMutableList()
             grid.animateReflow()
             performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             // The dragged tile's slot moved; keep it under the finger after the relayout.
@@ -549,27 +603,28 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private fun endDrag(d: Drag, showMenu: Boolean) {
         drag = null
         val v = d.view
-        v.dragHandler = null
+        d.holder.dragHandler = null
         grid.draggedView = null
         v.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).alpha(1f).setDuration(200)
             .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
             .setUpdateListener { grid.invalidate() }
             .withEndAction {
                 v.translationZ = 0f
-                v.lifted = false
+                d.holder.lifted = false
                 grid.invalidate()
             }
             .start()
         if (d.moved) {
-            tiles = grid.tiles.map { it.tile }.toMutableList()
+            tiles = grid.tiles.map { (it as TileHolder).tile }.toMutableList()
             store.save(tiles)
-            MetroUsage.recordMoved(launcher, v.tile.component.packageName, regionOf(v))
+            val t = d.holder.tile
+            if (t.isApp) MetroUsage.recordMoved(launcher, t.component.packageName, regionOf(v))
         }
         if (showMenu) showTileMenu(v)
     }
 
     /** Which part of Start a tile sits in: top or bottom of the first screen, or below it. */
-    private fun regionOf(v: TileView): MetroUsage.Region {
+    private fun regionOf(v: View): MetroUsage.Region {
         val rows = grid.rowsInViewport(scroller.height)
         val row = (v.top - grid.topPadding) / grid.rowPitch.coerceAtLeast(1)
         return when {

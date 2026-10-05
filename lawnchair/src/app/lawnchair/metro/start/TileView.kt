@@ -51,7 +51,7 @@ import java.util.concurrent.Executors
  * Windows Phone look; apps without one fall back to their normal full-colour icon.
  */
 @SuppressLint("ViewConstructor")
-class TileView(context: Context, var tile: MetroTile) : View(context) {
+class TileView(context: Context, override var tile: MetroTile) : View(context), TileHolder {
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -200,11 +200,16 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
                 invalidate()
             }
         }
-        MetroIcons.get(context, target) { apply(it) }?.let { apply(it) }
+        if (tile.kind == MetroTile.Kind.SHORTCUT) {
+            val id = tile.shortcutId ?: return
+            MetroIcons.getShortcut(context, target.packageName, id, tile.title) { apply(it) }?.let { apply(it) }
+        } else {
+            MetroIcons.get(context, target) { apply(it) }?.let { apply(it) }
+        }
     }
 
     /** True while picked up for dragging: a black frame sets it apart from the tiles below. */
-    var lifted = false
+    override var lifted = false
         set(value) {
             field = value
             invalidate()
@@ -215,7 +220,7 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     }
 
     /** Width of the black frame around a lifted tile. */
-    val liftBorder: Float get() = dp(4f)
+    override val liftBorder: Float get() = dp(4f)
 
     override fun onDraw(canvas: Canvas) {
         if (showingBack && hasBackFace) drawBack(canvas) else drawFront(canvas)
@@ -226,7 +231,29 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
         }
     }
 
-    private fun drawFill(canvas: Canvas): Int {
+    /**
+     * Legibility level where the wallpaper shows through the tile (window mode or translucent
+     * tiles): 0 off, 1 subtle, 2 strong. Solid tiles don't need it.
+     */
+    private fun legibility(): Int =
+        if (windowMode || MetroTheme.isTranslucent(context)) PreferenceManager.getInstance(context).metroLegibility.get() else 0
+
+    /** Shadows that lift white glyphs and text off bright wallpaper. */
+    private fun applyShadows() {
+        val l = legibility()
+        if (l == 0) {
+            iconPaint.clearShadowLayer()
+            labelPaint.clearShadowLayer()
+            countPaint.clearShadowLayer()
+            return
+        }
+        val c = if (l == 1) 0x99000000.toInt() else 0xD9000000.toInt()
+        iconPaint.setShadowLayer(dp(if (l == 1) 5f else 7f), 0f, dp(1f), c)
+        labelPaint.setShadowLayer(dp(if (l == 1) 3f else 4f), 0f, dp(1f), c)
+        countPaint.setShadowLayer(dp(if (l == 1) 3f else 4f), 0f, dp(1f), c)
+    }
+
+    private fun drawFill(canvas: Canvas, readingText: Boolean = false): Int {
         val w = width.toFloat()
         val h = height.toFloat()
         val base = MetroTheme.tileColor(context, tile.key, tile.color)
@@ -239,6 +266,24 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
             fillPaint.color = fill
             canvas.drawRect(0f, 0f, w, h, fillPaint)
         }
+        val l = legibility()
+        if (l > 0) {
+            // A light overall tint, darker behind text (the label row, or the whole tile when it
+            // shows messages), so white text reads on any wallpaper.
+            val base = when {
+                readingText -> if (l == 1) 0x59 else 0x80
+                else -> if (l == 1) 0x1A else 0x38
+            }
+            fillPaint.color = ColorUtils.setAlphaComponent(Color.BLACK, base)
+            canvas.drawRect(0f, 0f, w, h, fillPaint)
+            if (!readingText) {
+                val bottom = if (l == 1) 0x66 else 0x99
+                scrimPaint.shader = LinearGradient(0f, h * 0.55f, 0f, h, 0, ColorUtils.setAlphaComponent(Color.BLACK, bottom), Shader.TileMode.CLAMP)
+                canvas.drawRect(0f, h * 0.55f, w, h, scrimPaint)
+                scrimPaint.shader = null
+            }
+        }
+        applyShadows()
         return if (windowMode || MetroTheme.isTranslucent(context)) Color.WHITE else MetroTheme.onTileColor(base)
     }
 
@@ -324,7 +369,7 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
             canvas.drawRect(0f, h * 0.4f, w, h, scrimPaint)
             onColor = Color.WHITE
         } else {
-            onColor = drawFill(canvas)
+            onColor = drawFill(canvas, readingText = true)
         }
         headPaint.color = onColor
         bodyPaint.color = onColor
@@ -667,17 +712,17 @@ class TileView(context: Context, var tile: MetroTile) : View(context) {
     // Press feedback: the tile sinks slightly, like the WP tilt effect (full 3D tilt comes later).
     @SuppressLint("ClickableViewAccessibility")
     /** Where the last touch went down, for picking the tile up under the finger. */
-    var downX = 0f
+    override var downX = 0f
         private set
-    var downY = 0f
+    override var downY = 0f
         private set
-    var downRawX = 0f
+    override var downRawX = 0f
         private set
-    var downRawY = 0f
+    override var downRawY = 0f
         private set
 
     /** Set by Start while this tile is being dragged; it receives every touch event. */
-    var dragHandler: ((MotionEvent) -> Boolean)? = null
+    override var dragHandler: ((MotionEvent) -> Boolean)? = null
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {

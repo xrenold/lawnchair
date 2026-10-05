@@ -55,6 +55,27 @@ object MetroIcons {
         return null
     }
 
+    /**
+     * Icon and label for an app shortcut tile. Shortcut icons are often pictures (a contact, a
+     * web page), so they are kept in full colour.
+     */
+    @JvmStatic
+    fun getShortcut(context: Context, pkg: String, shortcutId: String, fallbackLabel: String?, onLoaded: (Icon) -> Unit): Icon? {
+        val k = "shortcut:$pkg#$shortcutId"
+        cache.get(k)?.let { return it }
+        val app = context.applicationContext
+        executor.execute {
+            val icon = cache.get(k) ?: run {
+                val info = app.lawnchair.metro.data.MetroShortcuts.find(app, pkg, shortcutId)
+                val d = info?.let { app.lawnchair.metro.data.MetroShortcuts.icon(app, it) }
+                val label = (info?.shortLabel ?: info?.longLabel)?.toString() ?: fallbackLabel ?: ""
+                Icon(runCatching { d?.let(::renderTrimmed) }.getOrNull(), false, label, 0)
+            }.also { cache.put(k, it) }
+            main.post { onLoaded(icon) }
+        }
+        return null
+    }
+
     /** Drops cached icons, e.g. after an app update or theme change. */
     @JvmStatic
     fun clear() = cache.evictAll()

@@ -340,7 +340,12 @@ public class AddItemActivity extends BaseActivity
     public void onPlaceAutomaticallyClick(View v) {
         if (mRequest.getRequestType() == PinItemRequest.REQUEST_TYPE_SHORTCUT) {
             ShortcutInfo shortcutInfo = mRequest.getShortcutInfo();
-            ItemInstallQueue.INSTANCE.get(this).queueItem(shortcutInfo);
+            if (app.lawnchair.metro.MetroMode.isStartEnabled(this)) {
+                // Metro: pinned shortcuts become Start tiles.
+                app.lawnchair.metro.data.MetroShortcuts.added(this, shortcutInfo);
+            } else {
+                ItemInstallQueue.INSTANCE.get(this).queueItem(shortcutInfo);
+            }
             logCommand(LAUNCHER_ADD_EXTERNAL_ITEM_PLACED_AUTOMATICALLY);
             mRequest.accept();
             CharSequence label = shortcutInfo.getLongLabel();

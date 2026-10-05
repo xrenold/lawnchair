@@ -130,6 +130,16 @@ fun MetroPreferenceGroups() {
                 step = 5,
                 showUnit = "%",
             )
+            ListPreference(
+                adapter = prefs.metroLegibility.getAdapter(),
+                label = "Text & icon legibility",
+                description = "Tint and shadows so icons and labels stay readable over busy wallpapers",
+                entries = listOf(
+                    ListPreferenceEntry(0) { "Off" },
+                    ListPreferenceEntry(1) { "Subtle" },
+                    ListPreferenceEntry(2) { "Strong" },
+                ),
+            )
             val colorMode = prefs.metroColorMode.getAdapter()
             ListPreference(
                 adapter = colorMode,

@@ -98,6 +98,8 @@ class PreferenceManager @Inject constructor(
     val metroBackgroundPhoto = IntPref("pref_metroBackgroundPhoto", 0, recreate)
     /** Live tiles flip to show content. */
     val metroLiveTiles = BoolPref("pref_metroLiveTiles", true, recreate)
+    /** Keeps icons and text readable over busy wallpapers: 0 off, 1 subtle, 2 strong. */
+    val metroLegibility = IntPref("pref_metroLegibility", 1, recreate)
     /** Live tiles may show message text from notifications. */
     val metroMessagePeek = BoolPref("pref_metroMessagePeek", true)
     /** Serialized Start screen tiles (JSON). Managed by MetroTileStore. */

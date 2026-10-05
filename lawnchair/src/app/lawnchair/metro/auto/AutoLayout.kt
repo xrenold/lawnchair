@@ -36,7 +36,7 @@ object AutoLayout {
 
     class Result(val tiles: List<MetroTile>, val added: Int, val removed: Int)
 
-    private enum class Kind { CHAT, MUSIC, MAIL, CALENDAR, OTHER }
+    private enum class Kind { CHAT, MUSIC, MAIL, CALENDAR, OTHER, WIDGET, SHORTCUT }
 
     private class App(
         val component: ComponentName,
@@ -45,8 +45,12 @@ object AutoLayout {
         val live: Double,
         val existing: MetroTile?,
         val manual: MetroUsage.Manual?,
+        /** Widget and shortcut tiles: kept as they are, only placed. */
+        val fixed: MetroTile? = null,
     ) {
         val pkg: String get() = component.packageName
+        /** Unique per item (several shortcuts can share an app). */
+        val key: String get() = fixed?.key ?: pkg
         val score: Double get() = tap + live * 0.5
     }
 
@@ -78,11 +82,12 @@ object AutoLayout {
         fun recently(t: Long, days: Int) = t > 0 && now - t < days * DAY
 
         // ---- What's eligible ----
-        val excluded = apps.filter { recently(it.manual?.unpinnedAt ?: 0, 30) && it.existing?.locked != true }.toSet()
-        val forced = apps.filter { it.existing?.locked == true || recently(it.manual?.pinnedAt ?: 0, 30) }.toSet()
+        val excluded = apps.filter { it.fixed == null && recently(it.manual?.unpinnedAt ?: 0, 30) && it.existing?.locked != true }.toSet()
+        val forced = apps.filter { it.fixed != null || it.existing?.locked == true || recently(it.manual?.pinnedAt ?: 0, 30) }.toSet()
         val ranked = apps.filter { it !in excluded }.sortedByDescending { it.score }.toMutableList()
 
         fun manualSize(a: App): TileSize? {
+            a.fixed?.let { return it.size }
             a.existing?.takeIf { it.locked }?.let { return it.size }
             val m = a.manual ?: return null
             return m.size?.takeIf { recently(m.sizeAt, 60) }
@@ -97,7 +102,7 @@ object AutoLayout {
         val placed = ArrayList<Pair<MetroTile, Pair<Int, Int>>>() // tile to (col,row)
         val used = HashSet<String>()
         fun take(list: List<App>, filter: (App) -> Boolean = { true }): App? =
-            list.firstOrNull { it.pkg !in used && filter(it) }?.also { used += it.pkg }
+            list.firstOrNull { it.key !in used && filter(it) }?.also { used += it.key }
 
         fun tileFor(a: App, size: TileSize) = a.existing?.copy(size = size) ?: MetroTile(0, a.component, size)
 
@@ -141,7 +146,7 @@ object AutoLayout {
         }
 
         // ---- Easy-reach area: most-opened apps ----
-        val byTap = ranked.filter { !prefers(it, MetroUsage.Region.TOP) && !prefers(it, MetroUsage.Region.BELOW) }
+        val byTap = ranked.filter { it.kind != Kind.WIDGET && !prefers(it, MetroUsage.Region.TOP) && !prefers(it, MetroUsage.Region.BELOW) }
             .sortedWith(compareByDescending<App> { prefers(it, MetroUsage.Region.BOTTOM) }.thenByDescending { it.tap })
         val thumbPatterns = thumbPatterns(blocksPerRow)
         // Fill the bottom row first, so the very top apps sit lowest (nearest the thumb).
@@ -160,12 +165,15 @@ object AutoLayout {
         // ---- Glance area: a hero wide tile and live tiles ----
         val liveFirst = ranked.filter { !prefers(it, MetroUsage.Region.BELOW) }
             .sortedWith(
-                compareByDescending<App> { prefers(it, MetroUsage.Region.TOP) }
-                    .thenByDescending { it.kind != Kind.OTHER }
+                compareByDescending<App> { it.kind == Kind.WIDGET }
+                    .thenByDescending { prefers(it, MetroUsage.Region.TOP) }
+                    .thenByDescending { it.kind != Kind.OTHER && it.kind != Kind.SHORTCUT }
                     .thenByDescending { it.score },
             )
         val hero = {
-            take(liveFirst) { (it.kind == Kind.MUSIC || it.kind == Kind.CHAT || it.live > 2) && okFor(it, TileSize.WIDE) }
+            take(liveFirst) {
+                (it.kind == Kind.MUSIC || it.kind == Kind.CHAT || it.kind == Kind.WIDGET || it.live > 2) && okFor(it, TileSize.WIDE)
+            }
         }
         val glancePatterns = glancePatterns(blocksPerRow)
         for (br in 0 until glanceBlockRows) {
@@ -179,18 +187,19 @@ object AutoLayout {
         }
 
         // ---- Below the first screen: the rest worth keeping, same rhythm ----
-        val keep = ranked.filter { it.pkg !in used && (it in forced || it.tap >= 1.0 || it.live >= 1.0) }
+        val keep = ranked.filter { it.key !in used && (it in forced || it.tap >= 1.0 || it.live >= 1.0) }
             .sortedByDescending { it.score }
         val maxExtraBlockRows = screenBlockRows * 2 // at most ~2 more screens
         val restPatterns = restPatterns(blocksPerRow)
         var br = screenBlockRows
         var guard = 0
-        while (keep.any { it.pkg !in used } && guard < maxExtraBlockRows) {
-            val remaining = keep.count { it.pkg !in used }
+        while (keep.any { it.key !in used } && guard < maxExtraBlockRows) {
+            val remaining = keep.count { it.key !in used }
             // Medium tiles for apps with live content or heavy use; quads for the rest.
             val mediumWorthy = { a: App -> a.kind != Kind.OTHER || a.live >= 2 || a.tap >= 8 }
             val pattern = when {
-                remaining <= 4 -> listOf(Block.QUAD)
+                blocksPerRow == 2 && remaining <= 4 -> listOf(Block.QUAD)
+                blocksPerRow >= 3 && remaining <= blocksPerRow -> List(remaining) { Block.MEDIUM }
                 else -> restPatterns[guard % restPatterns.size]
             }
             layRow(
@@ -204,13 +213,13 @@ object AutoLayout {
             guard++
         }
         // Forced apps that didn't get a slot (e.g. locked wide tiles) go at the end.
-        val leftovers = forced.filter { it.pkg !in used }
+        val leftovers = forced.filter { it.key !in used }
         var tailRow = br * 2
         for (a in leftovers) {
             val size = manualSize(a) ?: TileSize.MEDIUM
             placed += tileFor(a, size) to (0 to tailRow)
             tailRow += size.rowSpan
-            used += a.pkg
+            used += a.key
         }
 
         // Exact positions -> order: sorting by top-left cell (row, then column) makes the grid's
@@ -226,13 +235,16 @@ object AutoLayout {
 
     // ---- Patterns ---------------------------------------------------------------------------
 
+    // On 6 columns small tiles get tiny and hard to find, so patterns there are almost all
+    // medium tiles, with an occasional quad of smalls only to keep the rhythm.
+
     private fun glancePatterns(blocks: Int): List<List<Block>> = when (blocks) {
         2 -> listOf(listOf(Block.WIDE_LEFT), listOf(Block.MEDIUM, Block.MEDIUM), listOf(Block.MEDIUM, Block.QUAD))
         3 -> listOf(
             listOf(Block.WIDE_LEFT, Block.MEDIUM),
-            listOf(Block.MEDIUM, Block.QUAD, Block.MEDIUM),
+            listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM),
             listOf(Block.MEDIUM, Block.WIDE_LEFT),
-            listOf(Block.QUAD, Block.MEDIUM, Block.QUAD),
+            listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM),
         )
         else -> listOf(List(blocks) { Block.MEDIUM })
     }
@@ -240,18 +252,18 @@ object AutoLayout {
     /** Index 0 is the top row of the easy-reach area, the last index the bottom row. */
     private fun thumbPatterns(blocks: Int): List<List<Block>> = when (blocks) {
         2 -> listOf(listOf(Block.QUAD, Block.MEDIUM), listOf(Block.MEDIUM, Block.QUAD))
-        3 -> listOf(listOf(Block.QUAD, Block.MEDIUM, Block.QUAD), listOf(Block.MEDIUM, Block.QUAD, Block.MEDIUM))
-        else -> listOf(List(blocks) { Block.QUAD })
+        3 -> listOf(listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM), listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM))
+        else -> listOf(List(blocks) { Block.MEDIUM })
     }
 
     private fun restPatterns(blocks: Int): List<List<Block>> = when (blocks) {
         2 -> listOf(listOf(Block.MEDIUM, Block.QUAD), listOf(Block.QUAD, Block.MEDIUM), listOf(Block.QUAD, Block.QUAD))
         3 -> listOf(
-            listOf(Block.MEDIUM, Block.QUAD, Block.QUAD),
-            listOf(Block.QUAD, Block.MEDIUM, Block.QUAD),
-            listOf(Block.QUAD, Block.QUAD, Block.MEDIUM),
+            listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM),
+            listOf(Block.MEDIUM, Block.MEDIUM, Block.MEDIUM),
+            listOf(Block.MEDIUM, Block.QUAD, Block.MEDIUM),
         )
-        else -> listOf(List(blocks) { Block.QUAD })
+        else -> listOf(List(blocks) { Block.MEDIUM })
     }
 
     // ---- Signals ----------------------------------------------------------------------------
@@ -264,8 +276,18 @@ object AutoLayout {
         val opens = MetroUsage.appOpens(context)
         val minutes = MetroUsage.foregroundMinutes(context)
         val activeNow = LiveTileData.snapshot
-        val byPkg = current.associateBy { it.component.packageName }
-        return activities.map { info ->
+        val byPkg = current.filter { it.isApp }.associateBy { it.component.packageName }
+        // Widget and shortcut tiles you added: always kept, placed by type.
+        val extras = current.filter { !it.isApp }.map { t ->
+            val kind = if (t.kind == MetroTile.Kind.WIDGET) Kind.WIDGET else Kind.SHORTCUT
+            App(
+                t.component, kind,
+                tap = if (kind == Kind.SHORTCUT) 40.0 else 0.0,
+                live = if (kind == Kind.WIDGET) 100.0 else 0.0,
+                existing = t, manual = null, fixed = t,
+            )
+        }
+        return extras + activities.map { info ->
             val pkg = info.componentName.packageName
             val tap = MetroUsage.launchScore(context, pkg) + (opens[pkg] ?: 0.0) + min(minutes[pkg] ?: 0.0, 900.0) / 30.0
             val notif = MetroUsage.notificationsPerDay(context, pkg) + (activeNow[pkg]?.count ?: 0) * 0.5

@@ -538,6 +538,18 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onStop() {
         super.onStop()
         metroAwayInApp = true
+        app.lawnchair.metro.widgets.MetroWidgets.stopListening(this)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        app.lawnchair.metro.widgets.MetroWidgets.startListening(this)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        // Metro's widget bind / setup results come back here.
+        if (app.lawnchair.metro.widgets.MetroWidgets.onActivityResult(this, requestCode, resultCode)) return
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onResume() {

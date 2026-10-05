@@ -420,10 +420,27 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private fun showAppMenu(info: AppInfo, anchor: View) {
         val menu = PopupMenu(launcher, anchor, Gravity.START)
         menu.menu.add(0, 1, 0, "Pin to Start")
-        menu.menu.add(0, 2, 1, "App info")
-        menu.menu.add(0, 3, 2, "Uninstall")
+        // App shortcuts ("New chat", "Incognito tab"…) can be pinned as their own tiles.
+        val shortcuts = info.componentName?.packageName?.let {
+            app.lawnchair.metro.data.MetroShortcuts.forApp(launcher, it)
+        }.orEmpty()
+        if (shortcuts.isNotEmpty()) {
+            val sub = menu.menu.addSubMenu(0, 4, 1, "Pin shortcut to Start")
+            shortcuts.forEachIndexed { i, sc ->
+                sub.add(GROUP_SHORTCUT, i, i, sc.shortLabel ?: sc.longLabel ?: sc.id)
+            }
+        }
+        menu.menu.add(0, 2, 2, "App info")
+        menu.menu.add(0, 3, 3, "Uninstall")
         menu.setOnMenuItemClickListener { item ->
             val pkg = info.componentName?.packageName
+            if (item.groupId == GROUP_SHORTCUT) {
+                shortcuts.getOrNull(item.itemId)?.let {
+                    app.lawnchair.metro.data.MetroShortcuts.pinToStart(launcher, it)
+                    close(animate = true)
+                }
+                return@setOnMenuItemClickListener true
+            }
             when (item.itemId) {
                 1 -> {
                     val cn = info.componentName ?: return@setOnMenuItemClickListener true
@@ -693,5 +710,6 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     companion object {
         private const val PAN_MS = 300L
+        private const val GROUP_SHORTCUT = 9
     }
 }

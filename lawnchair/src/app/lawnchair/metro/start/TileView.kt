@@ -417,7 +417,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             }
             InfoKind.PHOTOS -> {
                 val show = slideshow ?: return false
-                if (!show.draw(canvas, w, h)) return false
+                if (show.restingOnIcon || !show.draw(canvas, w, h)) return false
                 if (tile.size != TileSize.SMALL) {
                     // A soft shade at the bottom so the name reads on any photo.
                     if (photoShadeH != h) {
@@ -827,7 +827,16 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     /** True while a flip is running, so Start can keep neighbours from flipping together. */
     val isFlipping: Boolean get() = flipping
 
-    private fun turn(swap: Boolean) {
+    /** The Photos tile wants to turn (to the next photo, its icon, or back). */
+    fun photoWantsTurn(): Boolean = infoKind == InfoKind.PHOTOS && slideshow?.wantsTurn() == true && !flipping
+
+    /** Turns the Photos tile over; what the other side shows is decided by its slideshow. */
+    fun turnPhoto() {
+        val show = slideshow ?: return
+        turn(swap = false) { show.onTurnMidway() }
+    }
+
+    private fun turn(swap: Boolean, midway: (() -> Unit)? = null) {
         if (flipping) return
         if (swap && !showingBack && !hasBackFace) return
         val toContent = !swap || !showingBack
@@ -840,6 +849,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             .setUpdateListener { syncWindow() }
             .withEndAction {
                 if (swap) showingBack = !showingBack
+                midway?.invoke()
                 itemIndex = 0
                 slide = 1f
                 invalidate()

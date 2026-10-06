@@ -14,12 +14,22 @@ import android.view.View
 import java.util.concurrent.Executors
 
 /**
- * The Photos tile slideshow: recent camera photos fill the tile, each slowly panning and
- * zooming (the Windows Phone "Ken Burns" drift), crossfading to the next every few seconds.
- * It only animates while the tile is actually being drawn, so it costs nothing while you're
- * in another app.
+ * The Photos tile slideshow, paced so the tile doesn't pull your eye away from Start. It moves
+ * only about a quarter of the time:
+ *
+ *  1. **Drift** (~18s): the photo very slowly zooms and pans.
+ *  2. **Fade** (1.5s) to the next photo, which then **holds still** (~30s).
+ *  3. The tile **turns** (a live-tile flip) to the next photo, which drifts again; or, every
+ *     other cycle, turns to its plain **icon** and rests there (~60s) before turning back to a
+ *     new photo.
+ *
+ * The turns themselves are started by Start's flip scheduler (see [wantsTurn]), so they never
+ * coincide with neighbouring tiles flipping. Nothing redraws during the still and resting
+ * phases, and drawing stops entirely while the tile is off screen.
  */
 class PhotoSlideshow(private val view: View) {
+
+    private enum class Phase { DRIFT, FADE, STILL, ICON }
 
     private val main = Handler(Looper.getMainLooper())
     private val visible = android.graphics.Rect()
@@ -34,8 +44,14 @@ class PhotoSlideshow(private val view: View) {
     private var index = 0
     private var current: Bitmap? = null
     private var next: Bitmap? = null
-    private var shownAt = 0L
     private var loading = false
+
+    private var phase = Phase.DRIFT
+    private var phaseStart = 0L
+    private var cycle = 0
+
+    /** True while resting on the plain icon (the tile then draws its normal face). */
+    val restingOnIcon: Boolean get() = phase == Phase.ICON
 
     /** New photo list; keeps the current photo if it's still in it. */
     fun update(list: List<Uri>) {
@@ -50,7 +66,8 @@ class PhotoSlideshow(private val view: View) {
             index = 0
             load(list[0]) { bmp ->
                 current = bmp
-                shownAt = System.currentTimeMillis()
+                phase = Phase.DRIFT
+                phaseStart = System.currentTimeMillis()
                 view.invalidate()
                 preloadNext()
             }
@@ -58,7 +75,7 @@ class PhotoSlideshow(private val view: View) {
     }
 
     private fun preloadNext() {
-        if (uris.size < 2) return
+        if (uris.size < 2 || next != null) return
         load(uris[(index + 1) % uris.size]) { next = it }
     }
 
@@ -88,49 +105,102 @@ class PhotoSlideshow(private val view: View) {
         }
     }
 
-    /** Draws the slideshow; returns false while there's nothing to show yet. */
+    /** Moves on to the preloaded photo, if there is one. */
+    private fun advance() {
+        val nxt = next ?: return
+        current = nxt
+        next = null
+        index = (index + 1) % uris.size.coerceAtLeast(1)
+        preloadNext()
+    }
+
+    /** True when the tile should turn now (Start decides when it's allowed). */
+    fun wantsTurn(now: Long = System.currentTimeMillis()): Boolean = when (phase) {
+        Phase.STILL -> now - phaseStart > STILL_MS
+        Phase.ICON -> now - phaseStart > ICON_MS
+        else -> false
+    }
+
+    /** Called at the edge-on point of a turn: swap to what the other side shows. */
+    fun onTurnMidway() {
+        val now = System.currentTimeMillis()
+        when (phase) {
+            Phase.STILL -> {
+                cycle++
+                if (cycle % 2 == 0) {
+                    phase = Phase.ICON // every other cycle: rest on the icon
+                } else {
+                    advance()
+                    phase = Phase.DRIFT
+                }
+            }
+            Phase.ICON -> {
+                advance()
+                phase = Phase.DRIFT
+            }
+            else -> Unit
+        }
+        phaseStart = now
+        view.invalidate()
+    }
+
+    /** Draws the slideshow; returns false to show the tile's normal face (no photo, or resting). */
     fun draw(canvas: Canvas, w: Float, h: Float): Boolean {
         val cur = current ?: return false
+        if (phase == Phase.ICON) return false
         val now = System.currentTimeMillis()
-        val elapsed = now - shownAt
-        drawKenBurns(canvas, cur, w, h, (elapsed / SHOW_MS.toFloat()).coerceIn(0f, 1.2f), index, 255)
-        val fadeStart = SHOW_MS - FADE_MS
-        val nxt = next
-        if (nxt != null && elapsed > fadeStart) {
-            val a = ((elapsed - fadeStart) / FADE_MS.toFloat()).coerceIn(0f, 1f)
-            drawKenBurns(canvas, nxt, w, h, 0f, index + 1, (a * 255).toInt())
-            if (a >= 1f) {
-                current = nxt
-                next = null
-                index = (index + 1) % uris.size.coerceAtLeast(1)
-                shownAt = now
-                preloadNext()
+        val elapsed = now - phaseStart
+        var animating = false
+        when (phase) {
+            Phase.DRIFT -> {
+                drawKenBurns(canvas, cur, w, h, (elapsed / DRIFT_MS.toFloat()).coerceIn(0f, 1f), index, 255)
+                if (elapsed >= DRIFT_MS) {
+                    phase = if (next != null) Phase.FADE else Phase.STILL
+                    phaseStart = now
+                }
+                animating = true
+                if (next == null) preloadNext()
             }
-        } else if (nxt == null && elapsed > SHOW_MS && uris.size > 1) {
-            preloadNext()
+            Phase.FADE -> {
+                drawKenBurns(canvas, cur, w, h, 1f, index, 255)
+                val nxt = next
+                if (nxt == null) {
+                    phase = Phase.STILL
+                    phaseStart = now
+                } else {
+                    val a = (elapsed / FADE_MS.toFloat()).coerceIn(0f, 1f)
+                    drawKenBurns(canvas, nxt, w, h, 0f, index + 1, (a * 255).toInt())
+                    if (a >= 1f) {
+                        advance()
+                        phase = Phase.STILL
+                        phaseStart = now
+                    } else {
+                        animating = true
+                    }
+                }
+            }
+            Phase.STILL -> drawKenBurns(canvas, cur, w, h, 0f, index, 255)
+            Phase.ICON -> Unit
         }
-        // About 30 frames a second is plenty for a slow drift. Stop when there's nothing left to
-        // move (a single photo that has finished drifting) or the tile is scrolled out of view.
-        val settled = uris.size < 2 && elapsed > SHOW_MS * 1.2f
-        if (!settled && view.getLocalVisibleRect(visible)) {
-            view.postInvalidateDelayed(33)
-        } else if (!settled) {
-            view.postInvalidateDelayed(500) // check again in a moment, cheaply
+        // Only the drift and the fade need frames (about 30 a second is plenty); still and
+        // resting phases don't redraw at all. Off screen, just check back now and then.
+        if (animating) {
+            if (view.getLocalVisibleRect(visible)) view.postInvalidateDelayed(33) else view.postInvalidateDelayed(500)
         }
         return true
     }
 
-    /** Centre-crop with a slow zoom (1.06 → 1.14) and a pan whose direction varies by photo. */
+    /** Centre-crop with a very slow zoom (1.06 → 1.09) and a short pan that varies by photo. */
     private fun drawKenBurns(canvas: Canvas, bmp: Bitmap, w: Float, h: Float, t: Float, seed: Int, alpha: Int) {
         val base = maxOf(w / bmp.width, h / bmp.height)
-        val zoom = 1.06f + 0.08f * t
+        val zoom = 1.06f + 0.03f * t
         val s = base * zoom
         val extraX = bmp.width * s - w
         val extraY = bmp.height * s - h
         val dirX = if (seed % 2 == 0) 1f else -1f
         val dirY = if ((seed / 2) % 2 == 0) 1f else -1f
-        val px = 0.5f + 0.3f * dirX * (t - 0.5f)
-        val py = 0.5f + 0.3f * dirY * (t - 0.5f)
+        val px = 0.5f + 0.15f * dirX * (t - 0.5f)
+        val py = 0.5f + 0.15f * dirY * (t - 0.5f)
         m.setScale(s, s)
         m.postTranslate(-extraX * px, -extraY * py)
         val shader = shaders.getOrPut(bmp) { BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
@@ -144,7 +214,9 @@ class PhotoSlideshow(private val view: View) {
     companion object {
         /** One loader for every slideshow. */
         private val loader = Executors.newSingleThreadExecutor()
-        private const val SHOW_MS = 7000L
-        private const val FADE_MS = 900L
+        private const val DRIFT_MS = 18_000L
+        private const val FADE_MS = 1_500L
+        private const val STILL_MS = 30_000L
+        private const val ICON_MS = 60_000L
     }
 }

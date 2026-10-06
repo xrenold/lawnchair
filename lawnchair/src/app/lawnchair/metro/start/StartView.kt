@@ -336,6 +336,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      */
     private val liveTicker = object : Runnable {
         override fun run() {
+            turnPhotoTiles()
             // Sleeps (checks every few seconds) while Start is hidden or nothing on it is live.
             val idle = !prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() ||
                 (0 until grid.childCount).none { (grid.getChildAt(it) as? TileView)?.let { t -> t.hasBackFace || t.showingBack } == true }
@@ -365,6 +366,20 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     it.flip()
                 }
         }
+    }
+
+    /**
+     * The Photos tile's turns (to the next photo, to its icon and back) go through here, so
+     * they follow the same rules as live-tile flips: never next to a tile that's flipping.
+     */
+    private fun turnPhotoTiles() {
+        if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() || panelOpen || holdShown) return
+        val tiles = (0 until grid.childCount).mapNotNull { grid.getChildAt(it) as? TileView }
+        val photo = tiles.filter { it.photoWantsTurn() && it.getLocalVisibleRect(visibleRect) }
+        if (photo.isEmpty()) return
+        val busy = tiles.filter { it.isFlipping }
+        if (busy.size >= 2) return
+        photo.firstOrNull { p -> busy.none { touches(p, it) } }?.turnPhoto()
     }
 
     private val touchA = Rect()

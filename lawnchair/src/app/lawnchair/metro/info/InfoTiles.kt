@@ -225,9 +225,12 @@ object InfoTiles {
     fun refreshAll() {
         refreshCalendar()
         refreshAlarm()
-        refreshPhotos()
+        // Photos change rarely; going home many times an hour needn't rescan them each time.
+        if (photos.isEmpty() || System.currentTimeMillis() - photosAt > 15 * 60_000L) refreshPhotos()
         maybeRefreshWeather(force = weather == null)
     }
+
+    private var photosAt = 0L
 
     // ---- Calendar --------------------------------------------------------------------------
 
@@ -333,8 +336,17 @@ object InfoTiles {
     fun refreshAlarm() {
         val app = appContext ?: return
         val next = runCatching { app.getSystemService(AlarmManager::class.java)?.nextAlarmClock }.getOrNull()
-        alarm = next?.let { NextAlarm(it.triggerTime, it.showIntent) }
+        // Android reports the next "alarm clock" from any app (to-do apps use them for reminders);
+        // only alarms set by the clock app count.
+        alarm = next?.takeIf { isClockAlarm(it.showIntent) }?.let { NextAlarm(it.triggerTime, it.showIntent) }
         notifyChanged()
+    }
+
+    /** True when [pi] (an alarm's show intent) belongs to the chosen clock app, or a known one if automatic. */
+    private fun isClockAlarm(pi: PendingIntent?): Boolean {
+        val creator = pi?.creatorPackage ?: return false
+        val chosen = overrides[InfoKind.CLOCK]
+        return if (chosen != null) creator == chosen else creator in CLOCK_PKGS
     }
 
     /** True when an alarm is set within the next day. */
@@ -353,11 +365,16 @@ object InfoTiles {
     fun refreshPhotos() {
         val app = appContext ?: return
         if (!hasPhotoAccess(app)) return
+        photosAt = System.currentTimeMillis()
         photoWorker.execute {
             photos = runCatching { queryPhotos(app) }.getOrDefault(photos)
             notifyChanged()
         }
     }
+
+    /** Where the faces are in each photo that has any (see PhotoQuality.Result.faces). */
+    @Volatile var photoFaces: Map<Uri, FloatArray> = emptyMap()
+        private set
 
     /** Photos from [photos] that suit wide tiles (landscape-shaped). */
     @Volatile var landscapePhotos: Set<Uri> = emptySet()
@@ -421,6 +438,7 @@ object InfoTiles {
             ordered += next
         }
         landscapePhotos = ordered.filter { it.q.landscape }.map { it.uri }.toSet()
+        photoFaces = ordered.mapNotNull { c -> c.q.faces?.let { c.uri to it } }.toMap()
         return ordered.map { it.uri }
     }
 

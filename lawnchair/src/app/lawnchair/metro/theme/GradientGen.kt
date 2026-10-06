@@ -1,86 +1,200 @@
 package app.lawnchair.metro.theme
 
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RadialGradient
-import android.graphics.Shader
-import androidx.core.graphics.ColorUtils
 import androidx.palette.graphics.Palette
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.pow
+import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Generates mesh-style gradient backgrounds, in the spirit of Apple Music's: a few large, soft
- * blobs of colour blended into a dark base, with a fine grain so the colour never bands.
+ * Generates mesh gradient backgrounds: several soft fields of colour that melt into each
+ * other, like recent phone and desktop wallpapers. Most of the picture is deep and dark, with
+ * one or two smaller areas that glow, and a fine grain over everything so it reads as a
+ * texture (and never bands).
  *
- * Colours lean dark and rich so white tiles and text stay readable (the automatic dim catches
- * the rest). Random gradients use harmonious palettes: neighbouring hues plus one contrasting
- * accent. Album gradients take the strongest colours of the album art.
+ * Random gradients pick from proven colour schemes (neighbouring hues with one contrasting
+ * accent, and a few variations). Album gradients use the art's own colours in the same style:
+ * its dark tones for the body, its most vivid ones for the glow.
+ *
+ * Rendering happens at a sixth of the size and is scaled up smoothly; a full-screen gradient
+ * takes a fraction of a second, only when one is generated.
  */
 object GradientGen {
 
-    /** A random harmonious gradient of [w]×[h] pixels. Same [seed], same gradient. */
+    /** A colour field: position (0..1), colour, and how far it reaches (fraction of the diagonal). */
+    private class Point(val x: Float, val y: Float, val color: Int, val reach: Float, val angle: Float = 0f)
+
+    /** A random gradient of [w]×[h] pixels. Same [seed], same gradient. */
     fun random(w: Int, h: Int, seed: Long): Bitmap {
         val rnd = Random(seed)
-        val baseHue = rnd.nextFloat() * 360f
-        val colors = ArrayList<Int>()
-        // Neighbouring hues for the body of the gradient…
-        val spread = 25f + rnd.nextFloat() * 25f
-        for (i in 0 until 3) {
-            val hue = (baseHue + (i - 1) * spread + rnd.nextFloat() * 10f + 360f) % 360f
-            colors += hsv(hue, 0.55f + rnd.nextFloat() * 0.3f, 0.32f + rnd.nextFloat() * 0.26f)
+        // Yellow-greens make a sickly dark body; shift them along the wheel.
+        val base = (rnd.nextFloat() * 360f).let { if (it in 55f..105f) it + 60f else it }
+        val scheme = rnd.nextInt(4)
+        val spread = 18f + rnd.nextFloat() * 22f
+        // Body hues (dark) and glow hues (bright), by scheme.
+        val bodyHues: List<Float>
+        val glowHues: List<Float>
+        when (scheme) {
+            0 -> { // neighbouring hues, one contrasting glow
+                bodyHues = listOf(base, base + spread, base - spread)
+                glowHues = listOf(base + 180f + (rnd.nextFloat() - 0.5f) * 40f)
+            }
+            1 -> { // neighbouring hues, glow in the same family
+                bodyHues = listOf(base, base + spread, base + spread * 2)
+                glowHues = listOf(base + spread * 0.5f)
+            }
+            2 -> { // split complementary: two glows either side of the opposite hue
+                bodyHues = listOf(base, base + spread * 0.6f)
+                glowHues = listOf(base + 150f, base + 210f)
+            }
+            else -> { // deep single hue with a warm or cool light
+                bodyHues = listOf(base, base + 8f, base - 8f)
+                glowHues = listOf(if (rnd.nextBoolean()) 35f + rnd.nextFloat() * 20f else 190f + rnd.nextFloat() * 30f)
+            }
         }
-        // …and one contrasting accent, used as a smaller blob.
-        val accentHue = (baseHue + 150f + rnd.nextFloat() * 60f) % 360f
-        colors += hsv(accentHue, 0.6f + rnd.nextFloat() * 0.25f, 0.4f + rnd.nextFloat() * 0.2f)
-        return render(w, h, colors, rnd)
+        // One body tone a little lighter, the rest deep: light and dark rather than one flat level.
+        val body = bodyHues.mapIndexed { i, hue ->
+            hsv(hue, 0.55f + rnd.nextFloat() * 0.3f, if (i == 0) 0.26f + rnd.nextFloat() * 0.12f else 0.1f + rnd.nextFloat() * 0.12f)
+        }
+        val glows = glowHues.map { hsv(it, 0.6f + rnd.nextFloat() * 0.3f, 0.62f + rnd.nextFloat() * 0.2f) }
+        // One glow always; a second only sometimes, so not every gradient is busy.
+        val glowCount = if (glows.size > 1 || rnd.nextFloat() < 0.35f) 2 else 1
+        return render(w, h, body, List(glowCount) { glows[it % glows.size] }, rnd)
     }
 
-    /** A gradient from the album art's strongest colours, darkened for legibility. */
+    /** A gradient from the album art's colours, in the same style. */
     fun fromArt(art: Bitmap, w: Int, h: Int): Bitmap {
         val palette = Palette.from(art).maximumColorCount(16).generate()
-        val picks = listOfNotNull(
-            palette.vibrantSwatch, palette.darkVibrantSwatch, palette.mutedSwatch,
-            palette.darkMutedSwatch, palette.lightVibrantSwatch, palette.dominantSwatch,
-        ).map { it.rgb }.distinct()
-        val colors = picks.ifEmpty { listOf(0xFF3A3A3A.toInt()) }.take(4).map { c ->
-            val hsv = FloatArray(3)
-            Color.colorToHSV(c, hsv)
-            hsv(hsv[0], hsv[1].coerceIn(0.35f, 0.85f), hsv[2].coerceIn(0.25f, 0.55f))
-        }
-        return render(w, h, colors, Random(colors.hashCode().toLong()))
+        val darks = listOfNotNull(palette.darkMutedSwatch, palette.darkVibrantSwatch, palette.dominantSwatch, palette.mutedSwatch)
+            .map { it.rgb }.distinct()
+        val brights = listOfNotNull(palette.vibrantSwatch, palette.lightVibrantSwatch, palette.lightMutedSwatch)
+            .map { it.rgb }.distinct()
+        val fallback = palette.dominantSwatch?.rgb ?: 0xFF404040.toInt()
+        val body = darks.ifEmpty { listOf(fallback) }.take(3).map { tone(it, 0.3f, 0.85f, 0.12f, 0.3f) }
+        val glows = brights.ifEmpty { listOf(fallback) }.take(2).map { tone(it, 0.45f, 0.95f, 0.6f, 0.82f) }
+        return render(w, h, body, glows, Random((body + glows).hashCode().toLong()))
     }
 
-    private fun hsv(h: Float, s: Float, v: Float) = Color.HSVToColor(floatArrayOf(h, s, v))
+    private fun tone(c: Int, sMin: Float, sMax: Float, vMin: Float, vMax: Float): Int {
+        val hsv = FloatArray(3)
+        Color.colorToHSV(c, hsv)
+        return hsv(hsv[0], hsv[1].coerceIn(sMin, sMax), hsv[2].coerceIn(vMin, vMax))
+    }
 
-    private fun render(w: Int, h: Int, colors: List<Int>, rnd: Random): Bitmap {
-        val bmp = Bitmap.createBitmap(w.coerceAtLeast(1), h.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        // Dark base, tinted by the first colour.
-        c.drawColor(ColorUtils.blendARGB(0xFF050505.toInt(), colors.first(), 0.25f))
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
-        val diag = Math.hypot(w.toDouble(), h.toDouble()).toFloat()
-        // Large soft blobs, then the accent (last colour) smaller.
-        colors.forEachIndexed { i, col ->
-            val accent = i == colors.lastIndex && colors.size > 3
-            val r = diag * (if (accent) 0.28f + rnd.nextFloat() * 0.12f else 0.45f + rnd.nextFloat() * 0.25f)
-            val cx = w * (0.1f + rnd.nextFloat() * 0.8f)
-            val cy = h * (0.1f + rnd.nextFloat() * 0.8f)
-            paint.shader = RadialGradient(
-                cx, cy, r,
-                intArrayOf(ColorUtils.setAlphaComponent(col, if (accent) 0xC0 else 0xE6), ColorUtils.setAlphaComponent(col, 0x55), 0),
-                floatArrayOf(0f, 0.55f, 1f),
-                Shader.TileMode.CLAMP,
+    private fun hsv(h: Float, s: Float, v: Float) = Color.HSVToColor(floatArrayOf(((h % 360f) + 360f) % 360f, s, v))
+
+    private fun render(w: Int, h: Int, body: List<Int>, glows: List<Int>, rnd: Random): Bitmap {
+        val outW = w.coerceAtLeast(1)
+        val outH = h.coerceAtLeast(1)
+        val sw = (outW / SCALE).coerceAtLeast(8)
+        val sh = (outH / SCALE).coerceAtLeast(8)
+        val aspect = sh.toFloat() / sw
+
+        // Body fields spread over a loose grid so the colours don't clump; glows land anywhere
+        // except the very edges, and stay smaller.
+        val points = ArrayList<Point>()
+        val cells = body.size + 2
+        for (i in 0 until cells) {
+            val gx = (i % 2 + 0.5f) / 2f
+            val gy = (i / 2 + 0.5f) / ((cells + 1) / 2f)
+            points += Point(
+                (gx + (rnd.nextFloat() - 0.5f) * 0.45f).coerceIn(-0.1f, 1.1f),
+                (gy + (rnd.nextFloat() - 0.5f) * 0.3f).coerceIn(-0.1f, 1.1f),
+                body[i % body.size],
+                0.32f + rnd.nextFloat() * 0.18f,
             )
-            c.drawCircle(cx, cy, r, paint)
         }
-        paint.shader = null
+        // Glows are long, soft streaks of light at a random angle.
+        val glowPoints = glows.map { g ->
+            Point(0.15f + rnd.nextFloat() * 0.7f, 0.1f + rnd.nextFloat() * 0.8f, g, 0.11f + rnd.nextFloat() * 0.07f, rnd.nextFloat() * 3.14f)
+        }
+        // Deep base the fields fade into, tinted by the first body colour.
+        val baseLin = lin(blend(0xFF040406.toInt(), body.first(), 0.35f))
+
+        // Gentle warp of the coordinates, so the fields have organic, uneven edges.
+        val f1 = 2f + rnd.nextFloat() * 3f
+        val f2 = 2f + rnd.nextFloat() * 3f
+        val p1 = rnd.nextFloat() * 6.28f
+        val p2 = rnd.nextFloat() * 6.28f
+        val amp = 0.1f + rnd.nextFloat() * 0.07f
+
+        val colorsLin = points.map { lin(it.color) }
+        val glowLin = glowPoints.map { lin(it.color) }
+        val glowCos = glowPoints.map { cos(it.angle) }
+        val glowSin = glowPoints.map { sin(it.angle) }
+        val px = IntArray(sw * sh)
+        val diag = kotlin.math.sqrt(1f + aspect * aspect)
+        for (yi in 0 until sh) {
+            val v = yi.toFloat() / (sh - 1)
+            for (xi in 0 until sw) {
+                val u = xi.toFloat() / (sw - 1)
+                val wu = u + amp * sin(v * f1 + p1) + amp * 0.25f * sin(v * f2 * 2.3f + p2)
+                val wv = v + amp * cos(u * f2 + p2) + amp * 0.25f * cos(u * f1 * 2.1f + p1)
+                var r = baseLin[0] * BASE_WEIGHT
+                var g = baseLin[1] * BASE_WEIGHT
+                var b = baseLin[2] * BASE_WEIGHT
+                var total = BASE_WEIGHT
+                for (k in points.indices) {
+                    val p = points[k]
+                    val dx = wu - p.x
+                    val dy = (wv - p.y) * aspect
+                    val d = (dx * dx + dy * dy) / (diag * diag)
+                    val reach = p.reach * p.reach
+                    val wt = exp(-d / reach)
+                    val c = colorsLin[k]
+                    r += c[0] * wt
+                    g += c[1] * wt
+                    b += c[2] * wt
+                    total += wt
+                }
+                r /= total
+                g /= total
+                b /= total
+                // Glows are laid over the body as light.
+                for (k in glowPoints.indices) {
+                    val p = glowPoints[k]
+                    val dx = wu - p.x
+                    val dy = (wv - p.y) * aspect
+                    val a1 = (dx * glowCos[k] + dy * glowSin[k]) / 1.9f
+                    val a2 = (-dx * glowSin[k] + dy * glowCos[k]) * 1.15f
+                    val d = (a1 * a1 + a2 * a2) / (diag * diag) / (p.reach * p.reach)
+                    val a = 0.85f * exp(-d.toDouble().pow(0.8).toFloat())
+                    val c = glowLin[k]
+                    r = r * (1f - a) + c[0] * a
+                    g = g * (1f - a) + c[1] * a
+                    b = b * (1f - a) + c[2] * a
+                }
+                // Darker towards the edges, for depth.
+                val vig = 1f - 0.45f * (((u - 0.5f) * (u - 0.5f) + (v - 0.5f) * (v - 0.5f) * 0.6f) * 2.2f).coerceIn(0f, 1f)
+                px[yi * sw + xi] = srgb(r * vig, g * vig, b * vig)
+            }
+        }
+        val small = Bitmap.createBitmap(px, sw, sh, Bitmap.Config.ARGB_8888)
+        val bmp = Bitmap.createScaledBitmap(small, outW, outH, true).copy(Bitmap.Config.ARGB_8888, true)
+        small.recycle()
         addGrain(bmp, rnd)
         return bmp
     }
 
-    /** Fine noise (±3 levels) so smooth gradients don't band on the display. */
+    /** Colours are mixed in linear light, so blends stay clean instead of going muddy. */
+    private fun lin(c: Int) = floatArrayOf(
+        (Color.red(c) / 255f).pow(2.2f),
+        (Color.green(c) / 255f).pow(2.2f),
+        (Color.blue(c) / 255f).pow(2.2f),
+    )
+
+    private fun srgb(r: Float, g: Float, b: Float): Int = Color.rgb(
+        (r.coerceIn(0f, 1f).pow(1f / 2.2f) * 255f + 0.5f).toInt(),
+        (g.coerceIn(0f, 1f).pow(1f / 2.2f) * 255f + 0.5f).toInt(),
+        (b.coerceIn(0f, 1f).pow(1f / 2.2f) * 255f + 0.5f).toInt(),
+    )
+
+    private fun blend(a: Int, b: Int, t: Float): Int = androidx.core.graphics.ColorUtils.blendARGB(a, b, t)
+
+    /** Fine film grain (±4 levels, same on all channels): barely visible, but it reads as texture. */
     private fun addGrain(bmp: Bitmap, rnd: Random) {
         val w = bmp.width
         val row = IntArray(w)
@@ -88,7 +202,7 @@ object GradientGen {
             bmp.getPixels(row, 0, w, 0, y, w, 1)
             for (x in 0 until w) {
                 val p = row[x]
-                val n = rnd.nextInt(7) - 3
+                val n = rnd.nextInt(9) - 4
                 val r = (((p shr 16) and 0xFF) + n).coerceIn(0, 255)
                 val g = (((p shr 8) and 0xFF) + n).coerceIn(0, 255)
                 val b = ((p and 0xFF) + n).coerceIn(0, 255)
@@ -97,4 +211,8 @@ object GradientGen {
             bmp.setPixels(row, 0, w, 0, y, w, 1)
         }
     }
+
+    private const val SCALE = 6
+    /** How strongly the dark base holds where no field reaches. */
+    private const val BASE_WEIGHT = 0.08f
 }

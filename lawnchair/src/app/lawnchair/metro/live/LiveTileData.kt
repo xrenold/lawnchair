@@ -52,6 +52,10 @@ data class LiveInfo(
     val isPlaying: Boolean = false,
     /** Notifications the Start panel can show (calls left out). */
     val panelCount: Int = 0,
+    /** Turn-by-turn navigation: [image] is the next turn's arrow, [title] the distance to it. */
+    val nav: Boolean = false,
+    /** Extra line for navigation (usually time left and arrival). */
+    val subText: CharSequence? = null,
 )
 
 /**
@@ -109,6 +113,8 @@ object LiveTileData {
         worker.execute {
             val result = runCatching { build(context) }.getOrDefault(emptyMap())
             main.post {
+                // Many updates change nothing a tile shows (a progress tick, a re-post): skip those.
+                if (result == snapshot) return@post
                 snapshot = result
                 listeners.toList().forEach { it(result) }
             }
@@ -161,12 +167,15 @@ object LiveTileData {
                 }
                 val prev = byPackage[sbn.packageName]
                 val image = cachedIcon(context, sbn)
+                val nav = sbn.notification.category == Notification.CATEGORY_NAVIGATION
                 byPackage[sbn.packageName] = (prev ?: LiveInfo(sbn.packageName)).copy(
-                    title = e.getCharSequence(Notification.EXTRA_TITLE),
-                    text = e.getCharSequence(Notification.EXTRA_TEXT) ?: e.getCharSequence(Notification.EXTRA_SUB_TEXT),
+                    title = e.getCharSequence(Notification.EXTRA_TITLE)?.toString(),
+                    text = (e.getCharSequence(Notification.EXTRA_TEXT) ?: e.getCharSequence(Notification.EXTRA_SUB_TEXT))?.toString(),
                     image = image,
                     ongoing = true,
                     progress = progress,
+                    nav = nav,
+                    subText = if (nav) e.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() else null,
                 )
             }
 
@@ -175,7 +184,11 @@ object LiveTileData {
             context.getSystemService(MediaSessionManager::class.java)
                 ?.getActiveSessions(ComponentName(context, NotificationListener::class.java))
         }.getOrNull().orEmpty()
-        for (controller in sessions) {
+        // Android hands out new controller objects each time; reuse ours per session so an
+        // unchanged song compares equal and doesn't redraw anything.
+        controllers.keys.retainAll(sessions.map { it.sessionToken }.toSet())
+        for (fresh in sessions) {
+            val controller = controllers.getOrPut(fresh.sessionToken) { fresh }
             val state = controller.playbackState?.state
             if (state != PlaybackState.STATE_PLAYING && state != PlaybackState.STATE_PAUSED) continue
             val meta = controller.metadata ?: continue
@@ -188,7 +201,8 @@ object LiveTileData {
             val pkg = controller.packageName
             // Keep the app's unread count; the music itself replaces the message content.
             val scaled = art?.let { a ->
-                val k = "$pkg|$title|${a.generationId}"
+                // Apps hand over a new bitmap object each time; key on what identifies the art.
+                val k = "$pkg|$title|$artist|${a.width}x${a.height}"
                 artCache?.takeIf { it.first == k }?.second ?: scaleDown(a).also { artCache = k to it }
             }
             byPackage[pkg] = LiveInfo(
@@ -209,6 +223,7 @@ object LiveTileData {
     private val itemCache = HashMap<String, Pair<Long, List<LiveItem>>>()
     private val iconCache = HashMap<String, Pair<Long, Bitmap?>>()
     private var artCache: Pair<String, Bitmap>? = null
+    private val controllers = HashMap<android.media.session.MediaSession.Token, android.media.session.MediaController>()
 
     private fun cachedItems(context: Context, sbn: StatusBarNotification): List<LiveItem> {
         itemCache[sbn.key]?.let { (t, items) -> if (t == sbn.postTime) return items }
@@ -216,8 +231,13 @@ object LiveTileData {
     }
 
     private fun cachedIcon(context: Context, sbn: StatusBarNotification): Bitmap? {
-        iconCache[sbn.key]?.let { (t, bmp) -> if (t == sbn.postTime) return bmp }
-        val bmp = runCatching { sbn.notification.getLargeIcon()?.let { loadIcon(context, it) } }.getOrNull()
+        val old = iconCache[sbn.key]
+        old?.let { (t, bmp) -> if (t == sbn.postTime) return bmp }
+        var bmp = runCatching { sbn.notification.getLargeIcon()?.let { loadIcon(context, it) } }.getOrNull()
+        // Navigation re-posts every few seconds, usually with the same arrow: keep the same
+        // picture then, so the tile sees nothing changed and doesn't redraw.
+        val prevBmp = old?.second
+        if (bmp != null && prevBmp != null && runCatching { bmp!!.sameAs(prevBmp) }.getOrDefault(false)) bmp = prevBmp
         iconCache[sbn.key] = sbn.postTime to bmp
         return bmp
     }

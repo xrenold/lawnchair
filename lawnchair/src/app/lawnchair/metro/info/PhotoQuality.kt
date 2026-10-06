@@ -21,8 +21,12 @@ import kotlin.math.sqrt
  */
 object PhotoQuality {
 
-    /** Score (0..1) and shape of a photo that passed, plus an 8×8 fingerprint for duplicates. */
-    data class Result(val score: Float, val landscape: Boolean, val hash: Long, val color: Int = 0)
+    /**
+     * Score (0..1) and shape of a photo that passed, plus an 8×8 fingerprint for duplicates.
+     * [faces] is the area holding everyone's faces (left, top, right, bottom as fractions of
+     * the photo), or null when no faces were found.
+     */
+    data class Result(val score: Float, val landscape: Boolean, val hash: Long, val color: Int = 0, val faces: FloatArray? = null)
 
     private const val SIDE = 96
 
@@ -31,21 +35,27 @@ object PhotoQuality {
     /** Cached or freshly computed result; null when the photo should be skipped. */
     fun evaluate(context: Context, id: Long, uri: Uri): Result? {
         val prefs = cache(context)
-        // "v2": rules changed (sharper blur check); older results are checked again once.
-        prefs.getString("v2_$id", null)?.let { return decode(it) }
+        // "v3": faces are found too; older results are checked again once.
+        prefs.getString("v3_$id", null)?.let { return decode(it) }
         // A failure to read (e.g. still syncing) isn't remembered, so it's tried again later.
         val result = runCatching { analyse(context, uri) }.getOrElse { return null }
-        prefs.edit().remove(id.toString()).putString("v2_$id", encode(result)).apply()
+        prefs.edit().remove(id.toString()).remove("v2_$id").putString("v3_$id", encode(result)).apply()
         return result
     }
 
-    private fun encode(r: Result?) = if (r == null) "x" else "${r.score},${if (r.landscape) 1 else 0},${r.hash},${r.color}"
+    private fun encode(r: Result?): String {
+        if (r == null) return "x"
+        val f = r.faces?.joinToString(",") { "%.3f".format(java.util.Locale.US, it) } ?: ""
+        return "${r.score},${if (r.landscape) 1 else 0},${r.hash},${r.color};$f"
+    }
 
     private fun decode(s: String): Result? {
         if (s == "x") return null
-        val p = s.split(',')
+        val main = s.substringBefore(';')
+        val p = main.split(',')
         if (p.size < 3) return null
-        return Result(p[0].toFloatOrNull() ?: return null, p[1] == "1", p[2].toLongOrNull() ?: 0L, p.getOrNull(3)?.toIntOrNull() ?: 0)
+        val faces = s.substringAfter(';', "").split(',').mapNotNull { it.toFloatOrNull() }.takeIf { it.size == 4 }?.toFloatArray()
+        return Result(p[0].toFloatOrNull() ?: return null, p[1] == "1", p[2].toLongOrNull() ?: 0L, p.getOrNull(3)?.toIntOrNull() ?: 0, faces)
     }
 
     private fun thumbnail(context: Context, uri: Uri): Bitmap? {
@@ -153,8 +163,45 @@ object PhotoQuality {
             ab += c and 0xFF
         }
         val color = android.graphics.Color.rgb((ar / px.size).toInt(), (ag / px.size).toInt(), (ab / px.size).toInt())
-        return Result(score, landscape, averageHash(gray), color)
+        return Result(score, landscape, averageHash(gray), color, findFaces(thumb))
     }
+
+    /**
+     * Where the faces are, with Android's built-in face finder (on the phone, no download). It
+     * finds faces looking roughly at the camera; profiles and tiny faces in the distance are
+     * missed, and the slideshow then falls back to a plain crop. Returns the area covering every
+     * face found, from the top of the head to below the chin, as fractions of the photo.
+     */
+    private fun findFaces(thumb: Bitmap): FloatArray? = runCatching {
+        val scale = 400f / maxOf(thumb.width, thumb.height)
+        var w = (thumb.width * minOf(scale, 1f)).toInt()
+        val h = (thumb.height * minOf(scale, 1f)).toInt()
+        if (w % 2 == 1) w-- // the face finder needs an even width
+        if (w < 32 || h < 32) return@runCatching null
+        val small = Bitmap.createScaledBitmap(thumb, w, h, true).copy(Bitmap.Config.RGB_565, false)
+        val found = arrayOfNulls<android.media.FaceDetector.Face>(MAX_FACES)
+        val n = android.media.FaceDetector(w, h, MAX_FACES).findFaces(small, found)
+        small.recycle()
+        var l = Float.MAX_VALUE
+        var t = Float.MAX_VALUE
+        var r = -1f
+        var b = -1f
+        val mid = android.graphics.PointF()
+        for (i in 0 until n) {
+            val f = found[i] ?: continue
+            val eyes = f.eyesDistance()
+            if (f.confidence() < 0.4f || eyes < w * 0.025f) continue // unsure, or a face in the far distance
+            f.getMidPoint(mid)
+            l = minOf(l, mid.x - eyes * 1.6f)
+            r = maxOf(r, mid.x + eyes * 1.6f)
+            t = minOf(t, mid.y - eyes * 1.8f) // hair and forehead
+            b = maxOf(b, mid.y + eyes * 2.2f) // chin
+        }
+        if (r < 0f) return@runCatching null
+        floatArrayOf((l / w).coerceIn(0f, 1f), (t / h).coerceIn(0f, 1f), (r / w).coerceIn(0f, 1f), (b / h).coerceIn(0f, 1f))
+    }.getOrNull()
+
+    private const val MAX_FACES = 6
 
     private const val BIG = 384
     private const val SHARP_MIN = 90.0

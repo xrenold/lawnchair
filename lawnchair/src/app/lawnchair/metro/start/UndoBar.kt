@@ -53,6 +53,8 @@ class UndoBar(context: Context) : LinearLayout(context) {
 
     fun show(parent: FrameLayout, message: String, hint: String?, onUndo: () -> Unit, onHint: () -> Unit, actionLabel: String = "UNDO") {
         undo.text = actionLabel
+        // Shown on Start or the app list: move over if it was last shown on the other.
+        (this.parent as? ViewGroup)?.takeIf { it !== parent }?.removeView(this)
         if (this.parent == null) {
             parent.addView(
                 this,

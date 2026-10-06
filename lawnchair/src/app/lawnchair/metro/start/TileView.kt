@@ -116,6 +116,8 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 return kind == InfoKind.CALENDAR && tile.size == TileSize.MEDIUM && infoPainter.nextEvent() != null
             }
             val info = live ?: return false
+            // Navigation: the next turn, at every size.
+            if (info.nav) return info.image != null || info.title != null
             // Album art works at every size, even on small tiles.
             if (info.isMusic) return info.title != null && (tile.size != TileSize.SMALL || info.image != null)
             if (tile.size == TileSize.SMALL) return false
@@ -330,8 +332,13 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     var iconInfo: MetroIcons.Icon? = null
         private set
 
-    /** True when this tile is drawn as a window onto the wallpaper (no fill). */
-    private val isWindow: Boolean get() = windowMode && brandColor == 0
+    /**
+     * True when this tile is drawn as a window onto the wallpaper (no fill). A colour picked for
+     * the tile (accent or a named colour) always draws solid, like brand tiles; "Automatic"
+     * keeps the window.
+     */
+    private val isWindow: Boolean
+        get() = windowMode && brandColor == 0 && (tile.color == 0 || tile.color == MetroTile.COLOR_BRAND)
 
     private fun drawFill(canvas: Canvas): Int {
         val base = if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tile.color)
@@ -422,6 +429,11 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             invalidate()
         }
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        slideshow?.onSizeChanged()
+    }
+
     private val infoPainter by lazy { InfoPainter(context) }
     private var slideshow: PhotoSlideshow? = null
     private val photoShade = Paint()
@@ -436,7 +448,12 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             } else {
                 InfoTiles.photos
             }
-            if (on) (slideshow ?: PhotoSlideshow(this).also { slideshow = it }).update(list) else slideshow = null
+            if (on) {
+                (slideshow ?: PhotoSlideshow(this).also { slideshow = it }).update(list)
+            } else {
+                slideshow?.release()
+                slideshow = null
+            }
         }
         if (showingBack && !hasBackFace) resetFace()
         invalidate()
@@ -514,6 +531,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             return
         }
         val info = live ?: return
+        if (info.nav) {
+            drawNav(canvas, info)
+            return
+        }
         val w = width.toFloat()
         val h = height.toFloat()
         val pad = dp(10f) * k
@@ -640,6 +661,92 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             shown++
         }
     }
+
+    // ---- Navigation (Google Maps and other turn-by-turn apps) ---------------------------------
+
+    private val navArrowPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private var navKey: String? = null
+    private var navStreet: StaticLayout? = null
+
+    /**
+     * While navigating: the next turn's arrow (from the app's notification) and the distance to
+     * it. Small tiles show just those two; larger tiles add the street and, on wide and large
+     * tiles, the time left and arrival.
+     */
+    private fun drawNav(canvas: Canvas, info: LiveInfo) {
+        val on = drawFill(canvas)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val arrow = info.image
+        // A plain arrow shape takes the tile's text colour; a picture with its own background
+        // is drawn as it is.
+        val shape = arrow != null && runCatching { Color.alpha(arrow.getPixel(1, 1)) < 40 }.getOrDefault(false)
+        if (!shape) {
+            navArrowPaint.colorFilter = null
+        } else if (navArrowPaint.colorFilter == null || navArrowColor != on) {
+            navArrowColor = on
+            navArrowPaint.colorFilter = PorterDuffColorFilter(on, PorterDuff.Mode.SRC_IN)
+        }
+        val distance = info.title?.toString().orEmpty()
+        if (tile.size == TileSize.SMALL) {
+            val box = minOf(w, h) * 0.46f
+            val top = h * 0.14f
+            arrow?.let { iconRect.set(w / 2f - box / 2f, top, w / 2f + box / 2f, top + box); canvas.drawBitmap(it, null, iconRect, navArrowPaint) }
+            countPaint.textSize = sp(11.5f)
+            countPaint.color = on
+            val t = TextUtils.ellipsize(distance, countPaint, w - dp(6f), TextUtils.TruncateAt.END)
+            canvas.drawText(t, 0, t.length, (w - countPaint.measureText(t, 0, t.length)) / 2f, h - dp(7f) - countPaint.descent(), countPaint)
+            return
+        }
+        val pad = dp(10f) * k
+        val cell = h / tile.size.rowSpan
+        val box = cell * 0.42f
+        arrow?.let { iconRect.set(pad, pad, pad + box, pad + box); canvas.drawBitmap(it, null, iconRect, navArrowPaint) }
+        // Distance beside the arrow, large and light.
+        headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        headPaint.textSize = spK(24f, 17f)
+        headPaint.color = on
+        val dx = if (arrow != null) pad + box + dp(8f) * k else pad
+        val d = TextUtils.ellipsize(distance, headPaint, w - dx - pad, TextUtils.TruncateAt.END)
+        val fm = headPaint.fontMetrics
+        canvas.drawText(d, 0, d.length, dx, pad + box / 2f - (fm.ascent + fm.descent) / 2f, headPaint)
+        // Street (and, with room, time left / arrival) below, above the name.
+        labelPaint.textSize = spK(13f, 11.5f)
+        val footerTop = h - pad - labelPaint.textSize
+        var y = pad + box + dp(6f) * k
+        val street = info.text?.toString()
+        if (!street.isNullOrEmpty()) {
+            val lines = when (tile.size) { TileSize.LARGE -> 3; TileSize.MEDIUM -> 2; else -> 1 }
+            val key = "$street|${(w - pad * 2).toInt()}|$lines|$on"
+            if (navKey != key) {
+                navKey = key
+                bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                bodyPaint.textSize = spK(14f, 11.5f)
+                bodyPaint.color = on
+                navStreet = layout(street, bodyPaint, (w - pad * 2).toInt().coerceAtLeast(1), lines)
+            }
+            navStreet?.let { l ->
+                if (y + l.height <= footerTop - dp(2f)) {
+                    canvas.save()
+                    canvas.translate(pad, y)
+                    l.draw(canvas)
+                    canvas.restore()
+                    y += l.height + dp(4f) * k
+                }
+            }
+        }
+        val eta = info.subText?.toString()
+        if (!eta.isNullOrEmpty() && tile.size != TileSize.MEDIUM) {
+            bodyPaint.textSize = spK(12.5f, 11f)
+            bodyPaint.color = ColorUtils.setAlphaComponent(on, 0xC8)
+            val e = TextUtils.ellipsize(eta, bodyPaint, w - pad * 2, TextUtils.TruncateAt.END)
+            val base = y - bodyPaint.ascent()
+            if (base + bodyPaint.descent() <= footerTop - dp(2f)) canvas.drawText(e, 0, e.length, pad, base, bodyPaint)
+        }
+        drawLabel(canvas, on)
+    }
+
+    private var navArrowColor = 0
 
     /** Medium back face content: picture and sender on one line, the message below. */
     private fun drawMediumRow(canvas: Canvas, row: BackRow, pad: Float, top: Float, bottom: Float, w: Float) {
@@ -892,6 +999,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     private fun turn(swap: Boolean, midway: (() -> Unit)? = null) {
         if (flipping) return
+        slideshow?.release() // a flip runs at full smoothness; the slideshow asks again once still
         if (swap && !showingBack && !hasBackFace) return
         val toContent = !swap || !showingBack
         flipping = true

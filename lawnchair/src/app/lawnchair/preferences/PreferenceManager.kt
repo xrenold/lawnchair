@@ -101,6 +101,8 @@ class PreferenceManager @Inject constructor(
     val metroAppPhotos = StringPref("pref_metroAppPhotos", "", recreate)
     val metroAppWeather = StringPref("pref_metroAppWeather", "", recreate)
     val metroAppClock = StringPref("pref_metroAppClock", "", recreate)
+    /** Start layout lock: no moving, resizing, unpinning, auto layout or pinning. */
+    val metroLayoutLocked = BoolPref("pref_metroLayoutLocked", false)
     /** Photos tile slideshow on/off. */
     val metroPhotoSlideshow = BoolPref("pref_metroPhotoSlideshow", true)
     /** Also set the phone's home screen wallpaper when applying a Start background photo. */

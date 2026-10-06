@@ -89,6 +89,20 @@ object InfoTiles {
         }
     }
 
+    /**
+     * Makes [pkg] the app for [kind] ("" = automatic). An app can carry one kind only, so it's
+     * cleared from any other kind it was set for.
+     */
+    fun setApp(context: Context, kind: InfoKind, pkg: String) {
+        if (pkg.isNotEmpty()) {
+            InfoKind.entries.filter { it != kind }.forEach { k ->
+                val p = appPref(context, k)
+                if (p.get() == pkg) p.set("")
+            }
+        }
+        appPref(context, kind).set(pkg)
+    }
+
     /** The preference holding the chosen app for [kind]. */
     fun appPref(context: Context, kind: InfoKind) = PreferenceManager.getInstance(context).let {
         when (kind) {
@@ -385,7 +399,10 @@ object InfoTiles {
         var i = 0
         while (i < byTime.size) {
             var j = i + 1
-            while (j < byTime.size && byTime[j].taken - byTime[j - 1].taken < 10 * 60_000L) j++
+            // Close in time to the previous shot, and no more than 15 minutes from the first.
+            while (j < byTime.size && byTime[j].taken - byTime[j - 1].taken < 10 * 60_000L &&
+                byTime[j].taken - byTime[i].taken < 15 * 60_000L
+            ) j++
             val moment = byTime.subList(i, j).sortedByDescending { it.q.score }
             val first = moment.first()
             kept += first

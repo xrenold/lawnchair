@@ -27,6 +27,9 @@ object CrashLog {
     private val events = ArrayDeque<String>()
     private val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
 
+    /** SimpleDateFormat isn't thread-safe; events come from several threads. */
+    private fun now(): String = synchronized(stamp) { stamp.format(Date()) }
+
     private fun dir(context: Context) = File(context.filesDir, "metro_crashes").apply { mkdirs() }
 
     /** Installs the crash handler (call once, early, from the application). */
@@ -44,7 +47,7 @@ object CrashLog {
     /** Notes a non-fatal problem; included in the next report. */
     @JvmStatic
     fun event(tag: String, message: String, error: Throwable? = null) {
-        val line = "${stamp.format(Date())} [$tag] $message" + (error?.let { " — ${it.javaClass.simpleName}: ${it.message}" } ?: "")
+        val line = "${now()} [$tag] $message" + (error?.let { " — ${it.javaClass.simpleName}: ${it.message}" } ?: "")
         synchronized(events) {
             events.addLast(line)
             while (events.size > MAX_EVENTS) events.removeFirst()
@@ -61,7 +64,7 @@ object CrashLog {
         val recent = synchronized(events) { events.toList().takeLast(40) }
         val text = buildString {
             appendLine("Metro crash report")
-            appendLine("Time: ${stamp.format(Date())}")
+            appendLine("Time: ${now()}")
             appendLine("Metro: ${versionName(context)}")
             appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")

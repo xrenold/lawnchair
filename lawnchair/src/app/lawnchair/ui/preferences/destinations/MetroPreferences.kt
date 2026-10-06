@@ -223,7 +223,7 @@ fun MetroPreferenceGroups() {
                 ClickablePreference(
                     label = title,
                     subtitle = chosenLabel,
-                    onClick = { MetroAppPicker.show(ctx, title, chosen) { pkg -> pref.set(pkg) } },
+                    onClick = { MetroAppPicker.show(ctx, title, chosen) { pkg -> app.lawnchair.metro.info.InfoTiles.setApp(ctx, kind, pkg) } },
                 )
             }
             SwitchPreference(

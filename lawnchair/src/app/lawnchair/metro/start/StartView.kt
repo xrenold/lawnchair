@@ -154,6 +154,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         // Brand colours depend on where tiles sit; re-check after every layout change.
         grid.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> scheduleBrands() }
 
+        // Scrolling to tiles that got news while out of view starts their dwell.
+        scroller.setOnScrollChangeListener { _, _, _, _, _ -> markVisibleNews() }
+
         // Pulling down past the top opens the notification shade.
         scroller.onPullPastTop = { openNotifications() }
 
@@ -290,6 +293,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         if (!hasWindowFocus) return
+        post { if (!landing) markVisibleNews() }
         // Back from the permission prompt (or settings): reload what was just allowed.
         val kinds = grid.tiles.mapNotNull { (it as? TileView)?.infoKind }.toSet()
         val now = kinds.mapNotNull { InfoTiles.permissionFor(it) }.filter { InfoTiles.hasPermission(launcher, it) }.toSet()
@@ -328,7 +332,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             tv.live = info
             if (info == null) continue
             val looking = isViewing()
-            val onScreen = looking && !panelOpen && !landing && tv.getLocalVisibleRect(visible)
+            val visibleNow = looking && !panelOpen && tv.getLocalVisibleRect(visible)
+            val onScreen = visibleNow && !landing
             val isNew = livePrimed && info.latestTime > (seenTimes[pkg] ?: 0L)
             when {
                 tv.isPinned && !tv.showingBack -> if (onScreen && livePrimed) tv.flip() else tv.showBackNow()
@@ -336,11 +341,13 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     tv.pickBackDwell(random)
                     if (tv.showingBack) tv.flipRefresh() else tv.flip()
                 }
+                // Visible but the tiles are still landing: flip once they've settled.
+                isNew && tv.hasBackFace && visibleNow && landing -> afterLanding += tv
                 // Arrived while you weren't looking (screen off, in an app, or scrolled away):
                 // the tile quietly turns to it, so it's already showing when you look.
                 isNew && tv.hasBackFace -> {
                     tv.pickBackDwell(random)
-                    tv.showBackNow()
+                    tv.showUnseen()
                 }
                 // Small tiles have no content side: one quick turn as the count goes up.
                 isNew && tv.tile.size == TileSize.SMALL && info.count > oldCount && onScreen -> flipSmall(tv, oldCount)
@@ -368,10 +375,33 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         if (now - tv.lastCountFlip < 10_000L) return
         val busyNeighbour = grid.tiles.any { it !== tv && (it as? TileView)?.isFlipping == true && touches(it, tv) }
         if (busyNeighbour) {
-            if (retry) postDelayed({ flipSmall(tv, oldCount, retry = false) }, 450)
+            if (retry) {
+                // Keep showing the old count while waiting, so the new one arrives with the turn.
+                tv.holdCount(oldCount)
+                postDelayed({
+                    if (isViewing() && !landing) flipSmall(tv, oldCount, retry = false) else tv.releaseCount()
+                }, 450)
+            } else {
+                tv.releaseCount()
+            }
             return
         }
         tv.flipCount(oldCount)
+    }
+
+    /** Tiles that got news while landing; they flip once the tiles have settled. */
+    private val afterLanding = LinkedHashSet<TileView>()
+
+    /**
+     * Tiles showing news that came while you weren't looking start their dwell once they're
+     * actually in view (after the app list closes, a panel closes, or you scroll to them).
+     */
+    private fun markVisibleNews() {
+        if (!isViewing()) return
+        for (i in 0 until grid.childCount) {
+            val tv = grid.getChildAt(i) as? TileView ?: continue
+            if (tv.unseen && tv.getLocalVisibleRect(visibleRect)) tv.markShownNow(0)
+        }
     }
 
     // ---- Landing: tiles settle onto Start when it comes into view ----------------------------
@@ -383,30 +413,57 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      * starts slightly enlarged (108%, as if just above the surface) and transparent, and settles
      * at 100% in a quick wave from the top-left. Live flips wait until it's done.
      */
+    private var landingAnim: android.animation.ValueAnimator? = null
+
     fun playLanding() {
         if (panProgress > 0f || drag != null || panel != null || width == 0) return
-        val tiles = grid.tiles.filter { it.getLocalVisibleRect(visibleRect) }
+        // Tiles mid-flip finish their flip instead.
+        val tiles = grid.tiles.filter { it.getLocalVisibleRect(visibleRect) && (it as? TileView)?.isFlipping != true }
         if (tiles.isEmpty()) return
+        landingAnim?.cancel()
         landing = true
         val pitch = grid.rowPitch.coerceAtLeast(1)
-        var longest = 0L
-        for (v in tiles) {
-            v.animate().cancel()
-            val wave = ((v.left / pitch) + (v.top - scroller.scrollY) / pitch).coerceAtLeast(0)
-            val delay = wave * 12L
-            v.scaleX = 1.08f
-            v.scaleY = 1.08f
-            v.alpha = 0f
-            v.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(delay).setDuration(350)
-                .setInterpolator(android.view.animation.DecelerateInterpolator(2f))
-                .setUpdateListener { grid.invalidate() }
-                .withEndAction { v.animate().setStartDelay(0) }
-                .start()
-            longest = maxOf(longest, delay + 350)
+        val delays = tiles.associateWith { v ->
+            (((v.left / pitch) + (v.top - scroller.scrollY) / pitch).coerceAtLeast(0) * 12L)
+        }
+        val duration = 350L
+        val longest = (delays.values.maxOrNull() ?: 0L) + duration
+        val ease = android.view.animation.DecelerateInterpolator(2f)
+        fun apply(elapsed: Long) {
+            for ((v, delay) in delays) {
+                if (v === grid.draggedView || v.parent == null) continue
+                val p = ease.getInterpolation(((elapsed - delay).toFloat() / duration).coerceIn(0f, 1f))
+                val s = 1.08f - 0.08f * p
+                v.scaleX = s
+                v.scaleY = s
+                v.alpha = p
+            }
+            grid.invalidate()
+        }
+        apply(0)
+        // One animator for the whole wave, so nothing lingers on the tiles' own animators.
+        landingAnim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            this.duration = longest
+            interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener { apply((it.animatedFraction * longest).toLong()) }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    apply(longest + duration)
+                    landing = false
+                    // News that came in while landing: flip now, one by one through the rules.
+                    afterLanding.forEach { tv ->
+                        if (tv.parent != null && tv.hasBackFace && !tv.isFlipping) {
+                            tv.pickBackDwell(random)
+                            if (tv.showingBack) tv.flipRefresh() else tv.flip()
+                        }
+                    }
+                    afterLanding.clear()
+                }
+            })
+            start()
         }
         // Tiles already showing news count their dwell from now, not from when it arrived.
         tiles.forEach { (it as? TileView)?.let { t -> if (t.showingBack && !t.isPinned) t.markShownNow(longest) } }
-        postDelayed({ landing = false }, longest)
     }
 
     /**
@@ -592,6 +649,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      */
     fun setPanProgress(p: Float) {
         panProgress = p
+        if (p == 0f) post { markVisibleNews() }
         scroller.translationX = -width * p
         parallax?.setPanFraction(p)
         if (parallax == null) {
@@ -738,7 +796,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 }
                 item.groupId == GROUP_LIVE -> {
                     val kind = listOf(InfoKind.CALENDAR, InfoKind.PHOTOS, InfoKind.WEATHER, InfoKind.CLOCK)[item.itemId]
-                    InfoTiles.appPref(launcher, kind).set(tile.component.packageName) // Start reloads
+                    InfoTiles.setApp(launcher, kind, tile.component.packageName) // Start reloads
                 }
                 item.itemId == MENU_SLIDESHOW -> {
                     prefs.metroPhotoSlideshow.set(!prefs.metroPhotoSlideshow.get())
@@ -1159,6 +1217,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 this@StartView.panel = null
                 panelOpen = false
                 launcher.setMetroBackEnabled(false)
+                markVisibleNews()
             }
             // Last card gone: the tile goes back to its icon side.
             val tv = panel.target.view as? TileView

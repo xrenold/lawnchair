@@ -139,7 +139,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     /** One turn of a small tile that lands showing the new count. */
     fun flipCount(oldCount: Int) {
-        if (flipping) return
+        if (flipping) {
+            releaseCount()
+            return
+        }
         lastCountFlip = System.currentTimeMillis()
         countHold = oldCount
         invalidate()
@@ -149,6 +152,29 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     /** The content side was put up while you were away: its dwell starts when you look. */
     fun markShownNow(delayMs: Long) {
         lastFlipAt = System.currentTimeMillis() + delayMs
+        unseen = false
+    }
+
+    /** Showing news that arrived while you weren't looking (dwell restarts when you look). */
+    var unseen = false
+
+    /** Turned to news while you weren't looking (or refreshed while already showing it). */
+    fun showUnseen() {
+        if (!showingBack) showBackNow()
+        unseen = true
+        invalidate()
+    }
+
+    /** Keeps showing [old] as the count until a count turn (or [releaseCount]). */
+    fun holdCount(old: Int) {
+        countHold = old
+        invalidate()
+    }
+
+    fun releaseCount() {
+        if (countHold < 0) return
+        countHold = -1
+        invalidate()
     }
 
     /** Shows the back face at once, without animating (for off-screen tiles). */

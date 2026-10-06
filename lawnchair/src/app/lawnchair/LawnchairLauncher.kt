@@ -298,10 +298,14 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     /** Back closes an open Metro notification panel (Start or app list). */
     private val metroBackHandler = object : com.android.launcher3.util.BackPressHandler {
-        override fun canHandleBack(): Boolean = metroAppList?.isPanelOpen == true || startView?.isPanelOpen == true
+        override fun canHandleBack(): Boolean =
+            metroAppList?.isPanelOpen == true || startView?.isPanelOpen == true || metroAppList?.isSearchActive == true
 
         override fun onBackInvoked() {
-            if (metroAppList?.closePanel() != true) startView?.closePanel()
+            // A panel closes first, then app list search (keyboard, then the text).
+            if (metroAppList?.closePanel() == true) return
+            if (startView?.closePanel() == true) return
+            metroAppList?.handleSearchBack()
         }
     }
 
@@ -316,7 +320,7 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onDragLayerHierarchyChanged() {
         super.onDragLayerHierarchyChanged()
         // Launcher3 turns the back gesture off again at home; keep it on while a panel is open.
-        if (startView?.isPanelOpen == true || metroAppList?.isPanelOpen == true) {
+        if (startView?.isPanelOpen == true || metroAppList?.isPanelOpen == true || metroAppList?.isSearchActive == true) {
             rootView?.setDisallowBackGesture(false)
         }
     }

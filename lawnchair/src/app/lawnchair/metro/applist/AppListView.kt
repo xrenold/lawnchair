@@ -161,6 +161,40 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         list.isVerticalScrollBarEnabled = false
         list.itemAnimator = null
         list.addItemDecoration(WindowMask())
+        // Scrolling the results, or tapping empty space, puts the keyboard away.
+        list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(rv: RecyclerView, newState: Int) {
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING && search.hasFocus()) {
+                    hideKeyboard()
+                    updateBack()
+                }
+            }
+        })
+        list.addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
+            private var downX = 0f
+            private var downY = 0f
+            override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = e.x
+                        downY = e.y
+                    }
+                    MotionEvent.ACTION_UP -> if (search.hasFocus() && abs(e.x - downX) < dp(10f) && abs(e.y - downY) < dp(10f) &&
+                        rv.findChildViewUnder(e.x, e.y) == null
+                    ) {
+                        hideKeyboard()
+                        updateBack()
+                    }
+                }
+                return false
+            }
+        })
+        statusStrip.setOnClickListener {
+            if (search.hasFocus()) {
+                hideKeyboard()
+                updateBack()
+            }
+        }
         addView(list, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         addView(searchPanel, LayoutParams(LayoutParams.MATCH_PARENT, 0, Gravity.BOTTOM))
@@ -205,7 +239,10 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-            override fun afterTextChanged(s: Editable?) = rebuildRows()
+            override fun afterTextChanged(s: Editable?) {
+                rebuildRows()
+                updateBack()
+            }
         })
         search.setOnEditorActionListener { _, actionId, event ->
             val go = actionId == EditorInfo.IME_ACTION_GO ||
@@ -216,6 +253,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             go
         }
         search.setOnFocusChangeListener { _, focused ->
+            updateBack()
             // Fallback for keyboards that don't animate their insets.
             if (focused && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 postDelayed({ rootWindowInsets?.let { applyIme(it, relayout = true) } }, 350)
@@ -398,6 +436,33 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private fun hideKeyboard() {
         search.clearFocus()
         launcher.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
+    }
+
+    /** True while search is in use (typing, or text still in the field): back works then. */
+    val isSearchActive: Boolean get() = isOpen && (search.hasFocus() || isSearching())
+
+    /**
+     * Back while searching: the first back hides the keyboard (your text stays), the next one
+     * clears the search. After that back is off again, as on the rest of the home screen.
+     */
+    fun handleSearchBack(): Boolean {
+        if (!isOpen) return false
+        if (search.hasFocus()) {
+            hideKeyboard()
+            updateBack()
+            return true
+        }
+        if (isSearching()) {
+            search.setText("")
+            updateBack()
+            return true
+        }
+        return false
+    }
+
+    /** Lets the system back gesture through only while there's something for it to do. */
+    private fun updateBack() {
+        launcher.setMetroBackEnabled(isSearchActive || panel != null)
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {

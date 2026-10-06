@@ -206,6 +206,26 @@ fun MetroPreferenceGroups() {
                     }
                 },
             )
+            // Live tile apps: which app's tile carries each info tile.
+            listOf(
+                app.lawnchair.metro.info.InfoKind.CALENDAR to "Calendar tile app",
+                app.lawnchair.metro.info.InfoKind.PHOTOS to "Photos tile app",
+                app.lawnchair.metro.info.InfoKind.WEATHER to "Weather tile app",
+                app.lawnchair.metro.info.InfoKind.CLOCK to "Clock tile app",
+            ).forEach { (kind, title) ->
+                val pref = app.lawnchair.metro.info.InfoTiles.appPref(ctx, kind)
+                val chosen = pref.getAdapter().state.value
+                val chosenLabel = if (chosen.isEmpty()) {
+                    "Automatic"
+                } else {
+                    runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(chosen, 0)).toString() }.getOrDefault(chosen)
+                }
+                ClickablePreference(
+                    label = title,
+                    subtitle = chosenLabel,
+                    onClick = { MetroAppPicker.show(ctx, title, chosen) { pkg -> pref.set(pkg) } },
+                )
+            }
             SwitchPreference(
                 adapter = prefs.metroAllDayEvents.getAdapter(),
                 label = "Show all-day events",
@@ -215,6 +235,30 @@ fun MetroPreferenceGroups() {
                 adapter = prefs.metroPhotoSlideshow.getAdapter(),
                 label = "Photo slideshow",
                 description = "Google Photos tile shows camera photos from the last 30 days",
+            )
+        }
+    }
+
+    ExpandAndShrink(visible = startEnabled.state.value) {
+        PreferenceGroup(heading = "Troubleshooting") {
+            val ctx = LocalContext.current
+            ClickablePreference(
+                label = "Crash reports",
+                subtitle = "Saved on this phone only. Tap to see them and share one.",
+                onClick = {
+                    val reports = app.lawnchair.metro.CrashLog.reports(ctx)
+                    if (reports.isEmpty()) {
+                        Toast.makeText(ctx, "No crashes so far", Toast.LENGTH_SHORT).show()
+                    } else {
+                        android.app.AlertDialog.Builder(ctx)
+                            .setTitle("Crash reports")
+                            .setItems(reports.map { "${it.second}\n${it.third}" }.toTypedArray()) { _, i ->
+                                app.lawnchair.metro.CrashLog.share(ctx, reports[i].first)
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
+                    }
+                },
             )
         }
     }
@@ -245,5 +289,27 @@ fun MetroPreferenceGroups() {
                 description = "Live tiles can show the sender and first line of new messages",
             )
         }
+    }
+}
+
+/** A simple list of launchable apps, with "Automatic" at the top. */
+private object MetroAppPicker {
+    fun show(context: android.content.Context, title: String, current: String, onPick: (String) -> Unit) {
+        val la = context.getSystemService(android.content.pm.LauncherApps::class.java)
+        val collator = java.text.Collator.getInstance()
+        val apps = la?.getActivityList(null, android.os.Process.myUserHandle()).orEmpty()
+            .distinctBy { it.componentName.packageName }
+            .filter { it.componentName.packageName != context.packageName }
+            .sortedWith { a, b -> collator.compare(a.label.toString(), b.label.toString()) }
+        val labels = listOf("Automatic") + apps.map { it.label.toString() }
+        val values = listOf("") + apps.map { it.componentName.packageName }
+        android.app.AlertDialog.Builder(context)
+            .setTitle(title)
+            .setSingleChoiceItems(labels.toTypedArray(), values.indexOf(current).coerceAtLeast(0)) { d, i ->
+                onPick(values[i])
+                d.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 }

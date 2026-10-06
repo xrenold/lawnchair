@@ -51,7 +51,8 @@ class UndoBar(context: Context) : LinearLayout(context) {
         addView(hint)
     }
 
-    fun show(parent: FrameLayout, message: String, hint: String?, onUndo: () -> Unit, onHint: () -> Unit) {
+    fun show(parent: FrameLayout, message: String, hint: String?, onUndo: () -> Unit, onHint: () -> Unit, actionLabel: String = "UNDO") {
+        undo.text = actionLabel
         if (this.parent == null) {
             parent.addView(
                 this,

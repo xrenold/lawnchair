@@ -96,6 +96,11 @@ class PreferenceManager @Inject constructor(
     val metroIconPack = StringPref("pref_metroIconPack", "", recreate)
     /** Start background source: "photo" (picked) or "gradient" (generated). */
     val metroBackgroundKind = StringPref("pref_metroBackgroundKind", "photo", recreate)
+    /** Apps whose tiles become the live info tiles ("" = automatic). */
+    val metroAppCalendar = StringPref("pref_metroAppCalendar", "", recreate)
+    val metroAppPhotos = StringPref("pref_metroAppPhotos", "", recreate)
+    val metroAppWeather = StringPref("pref_metroAppWeather", "", recreate)
+    val metroAppClock = StringPref("pref_metroAppClock", "", recreate)
     /** Photos tile slideshow on/off. */
     val metroPhotoSlideshow = BoolPref("pref_metroPhotoSlideshow", true)
     /** Also set the phone's home screen wallpaper when applying a Start background photo. */

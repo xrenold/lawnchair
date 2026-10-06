@@ -130,6 +130,27 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
      */
     val isPinned: Boolean get() = infoKind == null && live?.ongoing == true && hasBackFace
 
+    /** When a small tile last turned for a rising count (StartView limits how often). */
+    var lastCountFlip = 0L
+        private set
+
+    /** Count shown during a count turn, until the edge-on moment (-1 = the live count). */
+    private var countHold = -1
+
+    /** One turn of a small tile that lands showing the new count. */
+    fun flipCount(oldCount: Int) {
+        if (flipping) return
+        lastCountFlip = System.currentTimeMillis()
+        countHold = oldCount
+        invalidate()
+        turn(swap = false) { countHold = -1 }
+    }
+
+    /** The content side was put up while you were away: its dwell starts when you look. */
+    fun markShownNow(delayMs: Long) {
+        lastFlipAt = System.currentTimeMillis() + delayMs
+    }
+
     /** Shows the back face at once, without animating (for off-screen tiles). */
     fun showBackNow() {
         if (showingBack || !hasBackFace) return
@@ -146,7 +167,10 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     private val controlsShown: Boolean
         get() = showingBack && live?.isMusic == true && live?.controller != null &&
-            (tile.size == TileSize.WIDE || tile.size == TileSize.LARGE)
+            (tile.size == TileSize.WIDE || tile.size == TileSize.LARGE || tile.size == TileSize.MEDIUM)
+
+    /** Medium music tiles have room for one control: next. */
+    private val onlyNext: Boolean get() = tile.size == TileSize.MEDIUM
 
     private val countPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
@@ -297,7 +321,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         if (infoKind != null && drawInfoFront(canvas)) return
         val w = width.toFloat()
         val h = height.toFloat()
-        val count = live?.count ?: 0
+        val count = if (countHold >= 0) countHold else live?.count ?: 0
         val onColor = drawFill(canvas)
 
         labelPaint.textSize = spK(13f, 11.5f)
@@ -774,10 +798,14 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
      * the app name can stop short of it.
      */
     private fun drawControls(canvas: Canvas, info: LiveInfo, right: Float, cy: Float): Float {
-        val b = dp(34f) * k // touch target
+        val b = maxOf(dp(34f) * k, dp(28f)) // touch target
         val g = dp(16f) * k // glyph
         for (i in 0 until 3) {
-            val cx = right - b * (2 - i) - b / 2f
+            if (onlyNext && i < 2) {
+                controlRects[i].setEmpty()
+                continue
+            }
+            val cx = if (onlyNext) right - b / 2f else right - b * (2 - i) - b / 2f
             controlRects[i].set(cx - b / 2f, cy - b / 2f, cx + b / 2f, cy + b / 2f)
             val l = cx - g / 2f
             val t = cy - g / 2f
@@ -807,7 +835,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             controlPath.close()
             canvas.drawPath(controlPath, controlPaint)
         }
-        return b * 3
+        return if (onlyNext) b else b * 3
     }
 
     private fun countLabel(count: Int) = if (count > 99) "99+" else count.toString()

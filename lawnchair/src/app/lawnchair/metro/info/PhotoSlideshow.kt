@@ -83,10 +83,22 @@ class PhotoSlideshow(private val view: View) {
         if (loading) return
         loading = true
         val side = maxOf(view.width, view.height, 480).coerceAtMost(900)
+        // The tile's real size plus room for the drift's zoom, so photos stay sharp.
+        val tw = (view.width.coerceAtLeast(240) * 1.12f).toInt().coerceAtMost(1600)
+        val th = (view.height.coerceAtLeast(240) * 1.12f).toInt().coerceAtMost(1600)
         val resolver = view.context.contentResolver
         loader.execute {
             val bmp = runCatching {
-                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(resolver, uri)) { decoder, info, _ ->
+                        decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                        val iw = info.size.width
+                        val ih = info.size.height
+                        // Orientation-proof: the short side covers the tile's long side.
+                        val scale = maxOf(tw, th).toFloat() / minOf(iw, ih).coerceAtLeast(1)
+                        if (scale < 1f) decoder.setTargetSize((iw * scale).toInt().coerceAtLeast(1), (ih * scale).toInt().coerceAtLeast(1))
+                    }
+                } else if (android.os.Build.VERSION.SDK_INT >= 29) {
                     resolver.loadThumbnail(uri, Size(side, side), null)
                 } else {
                     val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }

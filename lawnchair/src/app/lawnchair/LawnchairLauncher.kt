@@ -48,6 +48,7 @@ import app.lawnchair.gestures.ui.LawnchairShortcutActivity
 import app.lawnchair.nexuslauncher.OverlayCallbackImpl
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
+import com.patrykmichalik.opto.core.setBlocking
 import app.lawnchair.preferences2.firstCached
 import app.lawnchair.root.RootHelperManager
 import app.lawnchair.root.RootNotAvailableException
@@ -181,6 +182,7 @@ class LawnchairLauncher : QuickstepLauncher() {
 
         if (MetroMode.isStartEnabled(this)) {
             addStartView()
+            switchOffHiddenFeatures()
         }
 
         prefs.launcherTheme.subscribeChanges(this, ::updateTheme)
@@ -292,6 +294,25 @@ class LawnchairLauncher : QuickstepLauncher() {
                 metroAppList?.close(animate = alreadyHome)
             } else if (alreadyHome) {
                 startView?.scrollToTop()
+            }
+        }
+    }
+
+    /**
+     * Metro hides the workspace, dock, search bar, At a glance and the Google feed. Once, when
+     * Metro is first used, switch those features off so they stop working in the background.
+     * Nothing is deleted: turning Metro off and these back on restores them.
+     */
+    private fun switchOffHiddenFeatures() {
+        val flags = getSharedPreferences("metro_cleanup", MODE_PRIVATE)
+        if (flags.getBoolean("v1", false)) return
+        flags.edit().putBoolean("v1", true).apply()
+        runCatching {
+            with(preferenceManager2) {
+                enableFeed.setBlocking(false)
+                showSuggestedAppsInDrawer.setBlocking(false)
+                isHotseatEnabled.setBlocking(false)
+                enableSmartspace.setBlocking(false) // restarts the launcher once
             }
         }
     }
@@ -584,7 +605,8 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun onResume() {
         super.onResume()
-        // Turnstile on return is switched off for now (StartView/AppListView.playReturn).
+        // Back on Start after an app or unlocking: the tiles settle onto Start.
+        if (metroAwayInApp && metroAppList?.isOpen != true) startView?.post { startView?.playLanding() }
         metroAwayInApp = false
         restartIfPending()
         refreshPredictionContainersFromModel()

@@ -66,6 +66,7 @@ class LawnchairApp : LauncherApplication() {
 
     override fun onCreate() {
         super.onCreate()
+        app.lawnchair.metro.CrashLog.install(this)
         instance = this
         QuickStepContract.sRecentsDisabled = !recentsEnabled
         Flowerpot.Manager.getInstance(this)

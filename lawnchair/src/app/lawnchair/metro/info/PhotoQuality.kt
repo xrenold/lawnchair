@@ -22,7 +22,7 @@ import kotlin.math.sqrt
 object PhotoQuality {
 
     /** Score (0..1) and shape of a photo that passed, plus an 8×8 fingerprint for duplicates. */
-    data class Result(val score: Float, val landscape: Boolean, val hash: Long)
+    data class Result(val score: Float, val landscape: Boolean, val hash: Long, val color: Int = 0)
 
     private const val SIDE = 96
 
@@ -31,31 +31,32 @@ object PhotoQuality {
     /** Cached or freshly computed result; null when the photo should be skipped. */
     fun evaluate(context: Context, id: Long, uri: Uri): Result? {
         val prefs = cache(context)
-        prefs.getString(id.toString(), null)?.let { return decode(it) }
+        // "v2": rules changed (sharper blur check); older results are checked again once.
+        prefs.getString("v2_$id", null)?.let { return decode(it) }
         // A failure to read (e.g. still syncing) isn't remembered, so it's tried again later.
         val result = runCatching { analyse(context, uri) }.getOrElse { return null }
-        prefs.edit().putString(id.toString(), encode(result)).apply()
+        prefs.edit().remove(id.toString()).putString("v2_$id", encode(result)).apply()
         return result
     }
 
-    private fun encode(r: Result?) = if (r == null) "x" else "${r.score},${if (r.landscape) 1 else 0},${r.hash}"
+    private fun encode(r: Result?) = if (r == null) "x" else "${r.score},${if (r.landscape) 1 else 0},${r.hash},${r.color}"
 
     private fun decode(s: String): Result? {
         if (s == "x") return null
         val p = s.split(',')
         if (p.size < 3) return null
-        return Result(p[0].toFloatOrNull() ?: return null, p[1] == "1", p[2].toLongOrNull() ?: 0L)
+        return Result(p[0].toFloatOrNull() ?: return null, p[1] == "1", p[2].toLongOrNull() ?: 0L, p.getOrNull(3)?.toIntOrNull() ?: 0)
     }
 
     private fun thumbnail(context: Context, uri: Uri): Bitmap? {
         val r = context.contentResolver
         return if (Build.VERSION.SDK_INT >= 29) {
-            r.loadThumbnail(uri, Size(256, 256), null)
+            r.loadThumbnail(uri, Size(512, 512), null)
         } else {
             val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             r.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
             var sample = 1
-            while (o.outWidth / (sample * 2) >= 256 && o.outHeight / (sample * 2) >= 256) sample *= 2
+            while (o.outWidth / (sample * 2) >= 512 && o.outHeight / (sample * 2) >= 512) sample *= 2
             r.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
         }
     }
@@ -114,24 +115,21 @@ object PhotoQuality {
         for (l in gray) varL += (l - mean) * (l - mean)
         val contrast = sqrt(varL / n)
 
-        // Sharpness: variance of the Laplacian; edge density for spotting text.
-        var lapSum = 0.0
-        var lapSum2 = 0.0
+        // Edge density on the small copy, for spotting text.
         var edges = 0
         var count = 0
         for (y in 1 until SIDE - 1) {
             for (x in 1 until SIDE - 1) {
                 val i = y * SIDE + x
                 val lap = (gray[i - 1] + gray[i + 1] + gray[i - SIDE] + gray[i + SIDE] - 4 * gray[i]) * 255.0
-                lapSum += lap
-                lapSum2 += lap * lap
                 if (abs(lap) > 40) edges++
                 count++
             }
         }
-        val lapMean = lapSum / count
-        val sharp = lapSum2 / count - lapMean * lapMean
-        if (sharp < 60) return null // blurry or shaken
+        // Sharpness on a 4× larger copy: shrinking hides blur, so judge it at a size where
+        // soft focus and shake still show. Variance of the Laplacian.
+        val sharp = sharpness(thumb)
+        if (sharp < SHARP_MIN) return null // blurry or shaken
 
         // Documents, receipts and screenshots of text: mostly white paper, little colour, many
         // small crisp edges.
@@ -145,7 +143,50 @@ object PhotoQuality {
                 (contrast / 0.28).coerceAtMost(1.0) * 0.30 +
                 (sharp / 1500.0).coerceAtMost(1.0) * 0.32
             ).toFloat()
-        return Result(score, landscape, averageHash(gray))
+        // Average colour, to tell apart shots of different scenes with similar layouts.
+        var ar = 0L
+        var ag = 0L
+        var ab = 0L
+        for (c in px) {
+            ar += (c shr 16) and 0xFF
+            ag += (c shr 8) and 0xFF
+            ab += c and 0xFF
+        }
+        val color = android.graphics.Color.rgb((ar / px.size).toInt(), (ag / px.size).toInt(), (ab / px.size).toInt())
+        return Result(score, landscape, averageHash(gray), color)
+    }
+
+    private const val BIG = 384
+    private const val SHARP_MIN = 90.0
+
+    private fun sharpness(thumb: Bitmap): Double {
+        val scale = BIG.toFloat() / maxOf(thumb.width, thumb.height)
+        val w = (thumb.width * scale).toInt().coerceAtLeast(8)
+        val h = (thumb.height * scale).toInt().coerceAtLeast(8)
+        val big = if (scale < 1f) Bitmap.createScaledBitmap(thumb, w, h, true) else thumb
+        val bw = big.width
+        val bh = big.height
+        val px = IntArray(bw * bh)
+        big.getPixels(px, 0, bw, 0, 0, bw, bh)
+        val g = FloatArray(px.size) { i ->
+            val c = px[i]
+            (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF))
+        }
+        var s = 0.0
+        var s2 = 0.0
+        var n = 0
+        for (y in 1 until bh - 1) {
+            for (x in 1 until bw - 1) {
+                val i = y * bw + x
+                val lap = (g[i - 1] + g[i + 1] + g[i - bw] + g[i + bw] - 4 * g[i]).toDouble()
+                s += lap
+                s2 += lap * lap
+                n++
+            }
+        }
+        if (n == 0) return 0.0
+        val m = s / n
+        return s2 / n - m * m
     }
 
     /** 8×8 average-brightness fingerprint: similar photos differ in few bits. */
@@ -162,4 +203,23 @@ object PhotoQuality {
     }
 
     fun similar(a: Long, b: Long) = java.lang.Long.bitCount(a xor b) <= 10
+
+    /** Looser check for photos of the same moment: similar layout, or similar layout and colour. */
+    fun sameScene(a: Result, b: Result): Boolean {
+        val bits = java.lang.Long.bitCount(a.hash xor b.hash)
+        if (bits <= 16) return true
+        if (bits > 24 || a.color == 0 || b.color == 0) return false
+        val dr = ((a.color shr 16) and 0xFF) - ((b.color shr 16) and 0xFF)
+        val dg = ((a.color shr 8) and 0xFF) - ((b.color shr 8) and 0xFF)
+        val db = (a.color and 0xFF) - (b.color and 0xFF)
+        return dr * dr + dg * dg + db * db < 30 * 30
+    }
+
+    /** How different two photos look (0 = same), for ordering the slideshow. */
+    fun difference(a: Result, b: Result): Int {
+        val dr = ((a.color shr 16) and 0xFF) - ((b.color shr 16) and 0xFF)
+        val dg = ((a.color shr 8) and 0xFF) - ((b.color shr 8) and 0xFF)
+        val db = (a.color and 0xFF) - (b.color and 0xFF)
+        return java.lang.Long.bitCount(a.hash xor b.hash) * 4 + (abs(dr) + abs(dg) + abs(db)) / 6
+    }
 }

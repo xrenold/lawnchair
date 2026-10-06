@@ -147,6 +147,9 @@ fun PreferencesDashboard(
                 isSelected = currentRoute is HomeScreen,
             )
 
+            // With Metro Start on, the workspace, dock, drawer, search bar, folders and gesture
+            // settings don't apply, so they're hidden (Metro has its own section under Home screen).
+            if (!prefs.metroTiles.getAdapter().state.value) {
             val isSmartspaceEnabled = prefs2.enableSmartspace.firstCached()
             PreferenceCategory(
                 label = stringResource(id = R.string.smartspace_widget),
@@ -199,6 +202,7 @@ fun PreferencesDashboard(
                 onNavigate = { onNavigate(Gestures) },
                 isSelected = currentRoute is Gestures,
             )
+            }
 
             ExpandAndShrink(
                 visible = LawnchairApp.isRecentsEnabled || BuildConfig.DEBUG,

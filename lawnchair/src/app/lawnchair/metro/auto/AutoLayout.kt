@@ -84,6 +84,7 @@ object AutoLayout {
 
     fun compute(context: Context, current: List<MetroTile>, columns: Int, screenRows: Int): Result {
         val now = System.currentTimeMillis()
+        InfoTiles.loadOverrides(context)
         val apps = gatherApps(context, current)
         fun recently(t: Long, days: Int) = t > 0 && now - t < days * DAY
 

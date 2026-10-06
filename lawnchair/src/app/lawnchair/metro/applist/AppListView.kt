@@ -310,6 +310,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         store.addUpdateListener(updateListener)
         LiveTileData.addListener(launcher, liveListener)
         refreshApps()
+        refreshUsage()
     }
 
     override fun onDetachedFromWindow() {
@@ -327,10 +328,38 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         return if (c in 'A'..'Z') c else '#'
     }
 
+    /** How much each app is used (Metro launches + Android usage), refreshed on each open. */
+    private var usage: Map<String, Double> = emptyMap()
+    private val usageWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun usageOf(info: AppInfo): Double = usage[info.componentName?.packageName] ?: 0.0
+
+    /** Re-reads usage in the background, then re-sorts (only while the list is closed or opening). */
+    private fun refreshUsage() {
+        val ctx = launcher.applicationContext
+        val pkgs = store.apps.mapNotNull { it.componentName?.packageName }.distinct()
+        usageWorker.execute {
+            val opens = runCatching { app.lawnchair.metro.data.MetroUsage.appOpens(ctx) }.getOrDefault(emptyMap())
+            val scores = pkgs.associateWith { pkg ->
+                (opens[pkg] ?: 0.0) + runCatching { app.lawnchair.metro.data.MetroUsage.launchScore(ctx, pkg) }.getOrDefault(0.0)
+            }
+            post {
+                usage = scores
+                if (!isOpen) refreshApps()
+            }
+        }
+    }
+
+    /**
+     * Alphabetical sections; within each letter, the apps you use most come first, and apps you
+     * rarely or never open stay alphabetical after them.
+     */
     private fun refreshApps() {
         allApps = store.apps
             .sortedWith(
                 compareBy<AppInfo> { if (sectionOf(it) == '#') 0 else 1 }
+                    .thenBy { sectionOf(it) }
+                    .thenByDescending { if (usageOf(it) >= 0.5) usageOf(it) else 0.0 }
                     .thenComparator { a, b -> collator.compare(a.title?.toString() ?: "", b.title?.toString() ?: "") },
             )
         rebuildRows()
@@ -342,7 +371,11 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         rows = if (query.isNotEmpty()) {
             // Best matches (name starts with the query) closest to the search bar.
             allApps.filter { it.title?.toString()?.contains(query, ignoreCase = true) == true }
-                .sortedBy { if (it.title?.toString()?.startsWith(query, ignoreCase = true) == true) 1 else 0 }
+                // …and among those, the ones you use more sit closer to the search bar.
+                .sortedWith(
+                    compareBy<AppInfo> { if (it.title?.toString()?.startsWith(query, ignoreCase = true) == true) 1 else 0 }
+                        .thenBy { usageOf(it) },
+                )
                 .map { Row.App(it) }
         } else {
             val out = ArrayList<Row>()
@@ -387,6 +420,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     fun close(animate: Boolean) {
         if (!isOpen) return
         isOpen = false
+        // Re-sort for next time while the list is out of sight, so rows never move under you.
+        postDelayed({ if (!isOpen) refreshUsage() }, 600)
         panel?.close(animate = false)
         hideKeyboard()
         search.setText("")
@@ -465,7 +500,62 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         launcher.setMetroBackEnabled(isSearchActive || panel != null)
     }
 
+    // ---- Left-edge scrubbing: slide up or down along the left edge to drive the scrubber ----
+
+    private val edgeSlop = android.view.ViewConfiguration.get(launcher).scaledTouchSlop
+    private var edgeCandidate = false
+    private var edgeScrubbing = false
+    private var edgeDownX = 0f
+    private var edgeDownY = 0f
+
+    /**
+     * A vertical slide starting at the left edge (lower two thirds) drives the right-hand
+     * alphabet scrubber, which bulges and previews exactly as if touched. Taps and sideways
+     * swipes from the edge behave as usual.
+     */
+    private fun handleLeftEdge(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                edgeScrubbing = false
+                edgeCandidate = panel == null && scrubber.visibility == VISIBLE && ev.x < dp(24f) && ev.y > height / 3f
+                edgeDownX = ev.x
+                edgeDownY = ev.y
+            }
+            MotionEvent.ACTION_MOVE -> if (edgeCandidate && !edgeScrubbing) {
+                val dx = abs(ev.x - edgeDownX)
+                val dy = abs(ev.y - edgeDownY)
+                if (dy > edgeSlop && dy > dx * 1.5f) {
+                    edgeScrubbing = true
+                    val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+                    super.dispatchTouchEvent(cancel)
+                    cancel.recycle()
+                    forwardToScrubber(ev, MotionEvent.ACTION_DOWN)
+                } else if (dx > edgeSlop) {
+                    edgeCandidate = false
+                }
+            }
+        }
+        if (!edgeScrubbing) return false
+        if (ev.actionMasked == MotionEvent.ACTION_MOVE || ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) {
+            forwardToScrubber(ev, ev.actionMasked)
+        }
+        if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) {
+            edgeScrubbing = false
+            edgeCandidate = false
+        }
+        return true
+    }
+
+    private fun forwardToScrubber(ev: MotionEvent, action: Int) {
+        val e = MotionEvent.obtain(ev)
+        e.action = action
+        e.setLocation(scrubber.width - dp(15f), ev.y - scrubber.top)
+        scrubber.dispatchTouchEvent(e)
+        e.recycle()
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (handleLeftEdge(ev)) return true
         // Swipe right-to-left on an app with notifications opens its panel (mirroring Start);
         // left-to-right still closes the list.
         if ((panel == null || panelSwipe.active) && panelSwipe.onTouch(ev)) return true

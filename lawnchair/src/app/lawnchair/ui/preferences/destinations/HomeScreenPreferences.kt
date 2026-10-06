@@ -77,6 +77,7 @@ fun HomeScreenPreferences(
 
         MetroPreferenceGroups()
 
+        if (!prefs.metroTiles.getAdapter().state.value) {
         if (showDeckLayout) {
             HomeLayoutSettings()
         }
@@ -266,6 +267,7 @@ fun HomeScreenPreferences(
                 showAsPercentage = true,
             )
         }
+        } // Metro Start replaces the workspace: its settings are hidden while Metro is on.
     }
 }
 

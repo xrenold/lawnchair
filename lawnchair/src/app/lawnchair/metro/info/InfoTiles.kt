@@ -19,6 +19,7 @@ import android.os.Looper
 import android.provider.CalendarContract
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
+import app.lawnchair.metro.CrashLog
 import app.lawnchair.preferences.PreferenceManager
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -73,9 +74,43 @@ object InfoTiles {
     private val CLOCK_PKGS = setOf("com.sec.android.app.clockpackage", "com.google.android.deskclock", "com.android.deskclock")
     private val PHOTOS_PKGS = setOf("com.google.android.apps.photos")
 
-    /** Which info tile an app's tile becomes, if any. */
+    /** Apps you chose for each info tile (Live tile apps setting); missing = automatic. */
+    @Volatile private var overrides: Map<InfoKind, String> = emptyMap()
+
+    /** Reads the Live tile apps choices. Call before deciding tile kinds. */
     @JvmStatic
-    fun kindOf(pkg: String, label: CharSequence? = null): InfoKind? = when {
+    fun loadOverrides(context: Context) {
+        val p = PreferenceManager.getInstance(context)
+        overrides = buildMap {
+            p.metroAppCalendar.get().takeIf { it.isNotEmpty() }?.let { put(InfoKind.CALENDAR, it) }
+            p.metroAppPhotos.get().takeIf { it.isNotEmpty() }?.let { put(InfoKind.PHOTOS, it) }
+            p.metroAppWeather.get().takeIf { it.isNotEmpty() }?.let { put(InfoKind.WEATHER, it) }
+            p.metroAppClock.get().takeIf { it.isNotEmpty() }?.let { put(InfoKind.CLOCK, it) }
+        }
+    }
+
+    /** The preference holding the chosen app for [kind]. */
+    fun appPref(context: Context, kind: InfoKind) = PreferenceManager.getInstance(context).let {
+        when (kind) {
+            InfoKind.CALENDAR -> it.metroAppCalendar
+            InfoKind.PHOTOS -> it.metroAppPhotos
+            InfoKind.WEATHER -> it.metroAppWeather
+            InfoKind.CLOCK -> it.metroAppClock
+        }
+    }
+
+    /**
+     * Which info tile an app's tile becomes, if any: the app you chose for a kind, otherwise
+     * the usual apps for it (unless you picked a different app for that kind).
+     */
+    @JvmStatic
+    fun kindOf(pkg: String, label: CharSequence? = null): InfoKind? {
+        overrides.entries.firstOrNull { it.value == pkg }?.let { return it.key }
+        val auto = autoKindOf(pkg, label) ?: return null
+        return if (overrides.containsKey(auto)) null else auto
+    }
+
+    private fun autoKindOf(pkg: String, label: CharSequence?): InfoKind? = when {
         pkg in CALENDAR_PKGS -> InfoKind.CALENDAR
         pkg in WEATHER_PKGS -> InfoKind.WEATHER
         pkg in CLOCK_PKGS -> InfoKind.CLOCK
@@ -329,7 +364,7 @@ object InfoTiles {
             "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.DATA} LIKE ?" to "%/DCIM/Camera/%"
         }
         class Candidate(val uri: Uri, val taken: Long, val q: PhotoQuality.Result)
-        val kept = ArrayList<Candidate>()
+        val all = ArrayList<Candidate>()
         context.contentResolver.query(
             collection, arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_TAKEN), selection,
             arrayOf(since.toString(), folder), "${MediaStore.Images.Media.DATE_TAKEN} DESC",
@@ -340,22 +375,36 @@ object InfoTiles {
                 val id = c.getLong(0)
                 val uri = ContentUris.withAppendedId(collection, id)
                 val q = PhotoQuality.evaluate(context, id, uri) ?: continue
-                val cand = Candidate(uri, c.getLong(1), q)
-                // A burst of near-identical shots keeps only its best.
-                val twin = kept.lastOrNull { abs(it.taken - cand.taken) < 15_000 && PhotoQuality.similar(it.q.hash, cand.q.hash) }
-                if (twin != null) {
-                    if (cand.q.score > twin.q.score) {
-                        kept.remove(twin)
-                        kept += cand
-                    }
-                } else {
-                    kept += cand
-                }
+                all += Candidate(uri, c.getLong(1), q)
             }
         }
-        val best = kept.sortedByDescending { it.q.score }.take(40).sortedByDescending { it.taken }
-        landscapePhotos = best.filter { it.q.landscape }.map { it.uri }.toSet()
-        return best.map { it.uri }
+        // Moments: photos taken within ~10 minutes of each other. Each moment keeps its best
+        // shot, plus a second only if it shows a clearly different scene.
+        val kept = ArrayList<Candidate>()
+        val byTime = all.sortedBy { it.taken }
+        var i = 0
+        while (i < byTime.size) {
+            var j = i + 1
+            while (j < byTime.size && byTime[j].taken - byTime[j - 1].taken < 10 * 60_000L) j++
+            val moment = byTime.subList(i, j).sortedByDescending { it.q.score }
+            val first = moment.first()
+            kept += first
+            moment.drop(1).firstOrNull { !PhotoQuality.sameScene(it.q, first.q) }?.let { kept += it }
+            i = j
+        }
+        val best = kept.sortedByDescending { it.q.score }.take(40)
+        // Varied order: each next photo is the one least like the one before.
+        val ordered = ArrayList<Candidate>()
+        val left = best.toMutableList()
+        if (left.isNotEmpty()) ordered += left.removeAt(0)
+        while (left.isNotEmpty()) {
+            val prev = ordered.last()
+            val next = left.maxByOrNull { PhotoQuality.difference(it.q, prev.q) + if (abs(it.taken - prev.taken) > 3_600_000L) 20 else 0 }!!
+            left.remove(next)
+            ordered += next
+        }
+        landscapePhotos = ordered.filter { it.q.landscape }.map { it.uri }.toSet()
+        return ordered.map { it.uri }
     }
 
     // ---- Weather -----------------------------------------------------------------------------
@@ -374,7 +423,14 @@ object InfoTiles {
         fetching = true
         weatherWorker.execute {
             val loc = lastLocation(app)
-            val result = if (loc != null) runCatching { fetchWeather(loc.latitude, loc.longitude) }.getOrNull() else null
+            val result = if (loc != null) {
+                runCatching { fetchWeather(loc.latitude, loc.longitude) }
+                    .onFailure { CrashLog.event("weather", "fetch failed", it) }
+                    .getOrNull()
+            } else {
+                CrashLog.event("weather", "no location available")
+                null
+            }
             main.post {
                 fetching = false
                 if (result != null) {

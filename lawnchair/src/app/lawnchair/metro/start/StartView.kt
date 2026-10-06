@@ -111,6 +111,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     init {
         id = View.generateViewId()
+        InfoTiles.loadOverrides(launcher)
         when (background) {
             MetroTheme.BG_BLACK -> setBackgroundColor(Color.BLACK)
             else -> setBackgroundColor(Color.TRANSPARENT)
@@ -178,6 +179,20 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         LiveTileData.addListener(launcher, liveListener)
         InfoTiles.addListener(infoListener)
         InfoTiles.start(launcher)
+        // After a crash: offer to share the report (it never leaves the phone otherwise).
+        if (app.lawnchair.metro.CrashLog.takeUnseen(launcher)) {
+            postDelayed({
+                val latest = app.lawnchair.metro.CrashLog.reports(launcher).firstOrNull()?.first ?: return@postDelayed
+                undoBar.show(
+                    this,
+                    message = "Metro stopped unexpectedly",
+                    hint = null,
+                    onUndo = { app.lawnchair.metro.CrashLog.share(launcher, latest) },
+                    onHint = {},
+                    actionLabel = "SHARE REPORT",
+                )
+            }, 1200)
+        }
         post { askInfoPermissions() }
         removeCallbacks(liveTicker)
         postDelayed(liveTicker, LIVE_TICK_MS)
@@ -309,9 +324,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             if (!tv.tile.isApp) continue
             val pkg = tv.tile.component.packageName
             val info = data[pkg]
+            val oldCount = tv.live?.count ?: 0
             tv.live = info
             if (info == null) continue
-            val onScreen = isShown && !panelOpen && tv.getLocalVisibleRect(visible)
+            val looking = isViewing()
+            val onScreen = looking && !panelOpen && !landing && tv.getLocalVisibleRect(visible)
             val isNew = livePrimed && info.latestTime > (seenTimes[pkg] ?: 0L)
             when {
                 tv.isPinned && !tv.showingBack -> if (onScreen && livePrimed) tv.flip() else tv.showBackNow()
@@ -319,6 +336,14 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     tv.pickBackDwell(random)
                     if (tv.showingBack) tv.flipRefresh() else tv.flip()
                 }
+                // Arrived while you weren't looking (screen off, in an app, or scrolled away):
+                // the tile quietly turns to it, so it's already showing when you look.
+                isNew && tv.hasBackFace -> {
+                    tv.pickBackDwell(random)
+                    tv.showBackNow()
+                }
+                // Small tiles have no content side: one quick turn as the count goes up.
+                isNew && tv.tile.size == TileSize.SMALL && info.count > oldCount && onScreen -> flipSmall(tv, oldCount)
             }
         }
         data.forEach { (pkg, info) -> if (info.latestTime > 0) seenTimes[pkg] = info.latestTime }
@@ -327,6 +352,62 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private val visibleRect = Rect()
     private val random = java.util.Random()
+
+    /** True when you can actually see Start: screen on, Start in front and not covered. */
+    private fun isViewing(): Boolean {
+        val pm = launcher.getSystemService(android.os.PowerManager::class.java)
+        return isShown && hasWindowFocus() && (pm?.isInteractive ?: true) && panProgress == 0f
+    }
+
+    /**
+     * A small tile's single turn when its count rises: the new number appears at the edge-on
+     * moment. At most once per tile every 10 seconds; if a neighbour is mid-flip it waits a beat.
+     */
+    private fun flipSmall(tv: TileView, oldCount: Int, retry: Boolean = true) {
+        val now = System.currentTimeMillis()
+        if (now - tv.lastCountFlip < 10_000L) return
+        val busyNeighbour = grid.tiles.any { it !== tv && (it as? TileView)?.isFlipping == true && touches(it, tv) }
+        if (busyNeighbour) {
+            if (retry) postDelayed({ flipSmall(tv, oldCount, retry = false) }, 450)
+            return
+        }
+        tv.flipCount(oldCount)
+    }
+
+    // ---- Landing: tiles settle onto Start when it comes into view ----------------------------
+
+    private var landing = false
+
+    /**
+     * After unlocking, or coming back from an app, the tiles on screen descend onto Start: each
+     * starts slightly enlarged (108%, as if just above the surface) and transparent, and settles
+     * at 100% in a quick wave from the top-left. Live flips wait until it's done.
+     */
+    fun playLanding() {
+        if (panProgress > 0f || drag != null || panel != null || width == 0) return
+        val tiles = grid.tiles.filter { it.getLocalVisibleRect(visibleRect) }
+        if (tiles.isEmpty()) return
+        landing = true
+        val pitch = grid.rowPitch.coerceAtLeast(1)
+        var longest = 0L
+        for (v in tiles) {
+            v.animate().cancel()
+            val wave = ((v.left / pitch) + (v.top - scroller.scrollY) / pitch).coerceAtLeast(0)
+            val delay = wave * 12L
+            v.scaleX = 1.08f
+            v.scaleY = 1.08f
+            v.alpha = 0f
+            v.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(delay).setDuration(350)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(2f))
+                .setUpdateListener { grid.invalidate() }
+                .withEndAction { v.animate().setStartDelay(0) }
+                .start()
+            longest = maxOf(longest, delay + 350)
+        }
+        // Tiles already showing news count their dwell from now, not from when it arrived.
+        tiles.forEach { (it as? TileView)?.let { t -> if (t.showingBack && !t.isPinned) t.markShownNow(longest) } }
+        postDelayed({ landing = false }, longest)
+    }
 
     /**
      * Flip scheduler. Every second or so, at most one on-screen tile flips: one that has shown
@@ -342,7 +423,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             val idle = !prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() ||
                 (0 until grid.childCount).none { (grid.getChildAt(it) as? TileView)?.let { t -> t.hasBackFace || t.showingBack } == true }
             postDelayed(this, if (idle) 5000L else LIVE_TICK_MS + random.nextInt(600))
-            if (idle || panelOpen || holdShown) return
+            if (idle || panelOpen || holdShown || landing) return
             val now = System.currentTimeMillis()
             val onScreen = (0 until grid.childCount)
                 .mapNotNull { grid.getChildAt(it) as? TileView }
@@ -374,7 +455,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      * they follow the same rules as live-tile flips: never next to a tile that's flipping.
      */
     private fun turnPhotoTiles() {
-        if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() || panelOpen || holdShown) return
+        if (!prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() || panelOpen || holdShown || landing) return
         val tiles = (0 until grid.childCount).mapNotNull { grid.getChildAt(it) as? TileView }
         val photo = tiles.filter { it.photoWantsTurn() && it.getLocalVisibleRect(visibleRect) }
         if (photo.isEmpty()) return
@@ -630,6 +711,16 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 colors.add(GROUP_COLOR, i + 3, i + 3, name.replaceFirstChar { it.uppercase() })
             }
         }
+        if (tile.isApp) {
+            // Make this app's tile one of the live info tiles.
+            val current = (view as? TileView)?.infoKind
+            val live = menu.menu.addSubMenu(Menu.NONE, MENU_LIVE, 2, "Live tile")
+            listOf(InfoKind.CALENDAR to "Calendar", InfoKind.PHOTOS to "Photos", InfoKind.WEATHER to "Weather", InfoKind.CLOCK to "Next alarm")
+                .forEachIndexed { i, (kind, name) ->
+                    live.add(GROUP_LIVE, i, i, name).setCheckable(true).isChecked = current == kind
+                }
+            live.setGroupCheckable(GROUP_LIVE, true, true)
+        }
         val isPhotos = (view as? TileView)?.infoKind == InfoKind.PHOTOS
         if (isPhotos) {
             menu.menu.add(Menu.NONE, MENU_SLIDESHOW, 2, if (prefs.metroPhotoSlideshow.get()) "Turn photo slideshow off" else "Turn photo slideshow on")
@@ -644,6 +735,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     tile.size = TileSize.entries[item.itemId]
                     if (tile.isApp) MetroUsage.recordSize(launcher, tile.component.packageName, tile.size)
                     commit(view)
+                }
+                item.groupId == GROUP_LIVE -> {
+                    val kind = listOf(InfoKind.CALENDAR, InfoKind.PHOTOS, InfoKind.WEATHER, InfoKind.CLOCK)[item.itemId]
+                    InfoTiles.appPref(launcher, kind).set(tile.component.packageName) // Start reloads
                 }
                 item.itemId == MENU_SLIDESHOW -> {
                     prefs.metroPhotoSlideshow.set(!prefs.metroPhotoSlideshow.get())
@@ -1097,6 +1192,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_INFO = 103
         private const val MENU_LOCK = 104
         private const val MENU_SLIDESHOW = 105
+        private const val MENU_LIVE = 106
+        private const val GROUP_LIVE = 3
         private const val REQUEST_INFO_PERMISSIONS = 7400
         private const val GROUP_SIZE = 1
         private const val GROUP_COLOR = 2

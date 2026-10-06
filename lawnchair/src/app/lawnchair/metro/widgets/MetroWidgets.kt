@@ -38,7 +38,9 @@ object MetroWidgets {
 
     fun createView(context: Context, widgetId: Int): AppWidgetHostView? {
         val info = AppWidgetManager.getInstance(context).getAppWidgetInfo(widgetId) ?: return null
-        return runCatching { host(context).createView(context, widgetId, info) }.getOrNull()
+        return runCatching { host(context).createView(context, widgetId, info) }
+            .onFailure { app.lawnchair.metro.CrashLog.event("widget", "couldn't load ${info.provider.flattenToShortString()}", it) }
+            .getOrNull()
     }
 
     fun delete(context: Context, widgetId: Int) = runCatching { host(context).deleteAppWidgetId(widgetId) }

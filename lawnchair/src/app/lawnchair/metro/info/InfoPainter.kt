@@ -290,14 +290,8 @@ class InfoPainter(private val context: Context) {
      * half full 12 hours before, nearly full in the last hour.
      */
     private fun drawAlarmRing(canvas: Canvas, cx: Float, cy: Float, radius: Float, k: Float, on: Int, until: Long, glyph: (Canvas, Float, Float, Float) -> Unit) {
-        val fill = (1f - until / InfoTiles.DAY.toFloat()).coerceIn(0f, 1f)
-        ring.strokeWidth = maxOf(dp(2f) * k, dp(1.5f))
-        ringRect.set(cx - radius, cy - radius, cx + radius, cy + radius)
-        ring.color = ColorUtils.setAlphaComponent(on, 0x40)
-        canvas.drawOval(ringRect, ring)
-        ring.color = on
-        if (fill > 0f) canvas.drawArc(ringRect, -90f, 360f * fill, false, ring)
-        val g = radius * 1.05f
+        // Just the clock glyph (the progress ring was dropped); it marks the tile as an alarm.
+        val g = radius * 1.5f
         glyph(canvas, cx - g / 2f, cy - g / 2f, g)
     }
 

@@ -100,7 +100,88 @@ class ParallaxBackgroundView(context: Context) : View(context) {
         setMeasuredDimension((w * (1 + travelX)).toInt(), (h * (1 + travel)).toInt())
     }
 
+    // ---- Album gradient (gradient backgrounds while music plays) ----
+
+    private var overlay: Bitmap? = null
+    private var overlayAlpha = 0f
+    private var overlayAnim: android.animation.ValueAnimator? = null
+    private val overlayPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    /**
+     * Crossfades (1s) to [bmp] drawn over the saved background, or back to the saved background
+     * when [bmp] is null. The bitmap should already carry its dim.
+     */
+    fun showOverlay(bmp: Bitmap?) {
+        overlayAnim?.cancel()
+        if (bmp != null) {
+            // From whatever shows now: draw the old overlay into the base of the fade.
+            val from = if (overlay != null && overlayAlpha > 0f) overlayAlpha else 0f
+            if (overlay != null && from > 0f) {
+                // Fade the new one in over the current overlay by swapping once it's covered.
+                previousOverlay = overlay
+                previousAlpha = from
+            }
+            overlay = bmp
+            overlayAlpha = 0f
+            animateOverlay(1f) { previousOverlay = null }
+        } else {
+            if (overlay == null) return
+            animateOverlay(0f) {
+                overlay = null
+                previousOverlay = null
+            }
+        }
+    }
+
+    private var previousOverlay: Bitmap? = null
+    private var previousAlpha = 0f
+
+    private fun animateOverlay(to: Float, end: () -> Unit) {
+        overlayAnim = android.animation.ValueAnimator.ofFloat(overlayAlpha, to).apply {
+            duration = 1000
+            addUpdateListener {
+                overlayAlpha = it.animatedValue as Float
+                invalidate()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) = end()
+            })
+            start()
+        }
+    }
+
+    private fun drawFill(canvas: Canvas, bmp: Bitmap, paint: Paint) {
+        val boxW = width.toFloat()
+        val boxH = height.toFloat()
+        val scale = maxOf(boxW / bmp.width, boxH / bmp.height)
+        val w = bmp.width * scale
+        val h = bmp.height * scale
+        dst.set((boxW - w) / 2f, (boxH - h) / 2f, (boxW - w) / 2f + w, (boxH - h) / 2f + h)
+        canvas.drawBitmap(bmp, null, dst, paint)
+    }
+
     override fun onDraw(canvas: Canvas) {
+        val ov = overlay
+        if (ov != null && overlayAlpha >= 1f && previousOverlay == null) {
+            // Fully covered: draw only the album gradient (one full-screen bitmap per frame).
+            overlayPaint.alpha = 255
+            drawFill(canvas, ov, overlayPaint)
+            return
+        }
+        drawBase(canvas)
+        previousOverlay?.let {
+            overlayPaint.alpha = (previousAlpha * 255).toInt()
+            drawFill(canvas, it, overlayPaint)
+        }
+        overlay?.let {
+            if (overlayAlpha > 0f) {
+                overlayPaint.alpha = (overlayAlpha * 255).toInt()
+                drawFill(canvas, it, overlayPaint)
+            }
+        }
+    }
+
+    private fun drawBase(canvas: Canvas) {
         val bmp = bitmap ?: return
         // Centre-crop into the whole (taller-than-screen) view.
         val boxW = width.toFloat()

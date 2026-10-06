@@ -302,6 +302,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      */
     private fun applyLive(data: Map<String, LiveInfo>) {
         panel?.refresh()
+        updateAlbumGradient(data)
         val visible = Rect()
         for (i in 0 until grid.childCount) {
             val tv = grid.getChildAt(i) as? TileView ?: continue
@@ -406,6 +407,60 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private fun assignBrands() {
         if (drag != null) return
         if (BrandTiles.assign(grid, scroller.height) && windowMode) grid.invalidate()
+    }
+
+    // ---- Gradient background: album colours while music plays -------------------------------
+
+    private val gradientBackground: Boolean
+        get() = background != MetroTheme.BG_BLACK && prefs.metroBackgroundKind.get() == "gradient" && parallax != null
+    private var albumKey: String? = null
+    private var lastPlayingAt = 0L
+    private val albumWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /** A pause of more than a minute counts as stopped: back to the saved gradient. */
+    private val albumStopCheck = Runnable {
+        val playing = LiveTileData.snapshot.values.any { it.isMusic && it.isPlaying }
+        if (!playing && System.currentTimeMillis() - lastPlayingAt >= ALBUM_HOLD_MS - 500) {
+            albumKey = null
+            parallax?.showOverlay(null)
+        }
+    }
+
+    /**
+     * With a gradient background, playing music turns Start's background into a gradient made
+     * from the album art (a new one for each song); it goes back to your saved gradient once the
+     * music has stopped for a minute. The phone wallpaper isn't touched.
+     */
+    private fun updateAlbumGradient(data: Map<String, LiveInfo>) {
+        val bg = parallax ?: return
+        if (!gradientBackground) return
+        val music = data.values.firstOrNull { it.isMusic && it.isPlaying && it.image != null }
+        if (music == null) {
+            if (albumKey != null) {
+                removeCallbacks(albumStopCheck)
+                postDelayed(albumStopCheck, ALBUM_HOLD_MS)
+            }
+            return
+        }
+        lastPlayingAt = System.currentTimeMillis()
+        removeCallbacks(albumStopCheck)
+        val key = music.packageName + "|" + music.title
+        if (key == albumKey) return
+        albumKey = key
+        val art = music.image ?: return
+        // Half resolution is plenty for soft colour; the view scales it up smoothly.
+        val w = (bg.width / 2).coerceAtLeast(64)
+        val h = (bg.height / 2).coerceAtLeast(64)
+        val level = prefs.metroLegibility.get()
+        albumWorker.execute {
+            val bmp = runCatching {
+                app.lawnchair.metro.theme.GradientGen.fromArt(art, w, h).also { g ->
+                    val dim = BackgroundDim.dimFor(BackgroundDim.luminanceOf(g), level)
+                    if (dim > 0f) android.graphics.Canvas(g).drawColor(android.graphics.Color.argb((dim * 255).toInt(), 0, 0, 0))
+                }
+            }.getOrNull() ?: return@execute
+            post { if (albumKey == key) bg.showOverlay(bmp) }
+        }
     }
 
     /** Measures the background's brightness and sets the dim to match. */
@@ -1046,5 +1101,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val GROUP_SIZE = 1
         private const val GROUP_COLOR = 2
         private const val LIVE_TICK_MS = 1100L
+        private const val ALBUM_HOLD_MS = 60_000L
     }
 }

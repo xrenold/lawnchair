@@ -85,6 +85,12 @@ fun MetroPreferenceGroups() {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
             )
+            ClickablePreference(
+                label = "Generate gradient",
+                subtitle = "A soft random colour gradient, shuffled in a preview. While music plays, Start's " +
+                    "background takes the album's colours, and goes back when the music stops.",
+                onClick = { app.lawnchair.metro.start.BackgroundPreviewActivity.startGradient(context) },
+            )
             ExpandAndShrink(visible = hasPhoto) {
                 ClickablePreference(
                     label = "Use system wallpaper instead",

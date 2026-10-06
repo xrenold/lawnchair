@@ -94,6 +94,8 @@ class PreferenceManager @Inject constructor(
     val metroBackgroundPhoto = IntPref("pref_metroBackgroundPhoto", 0, recreate)
     /** Icon pack package for Metro tiles and the app list ("" = system icons). */
     val metroIconPack = StringPref("pref_metroIconPack", "", recreate)
+    /** Start background source: "photo" (picked) or "gradient" (generated). */
+    val metroBackgroundKind = StringPref("pref_metroBackgroundKind", "photo", recreate)
     /** Photos tile slideshow on/off. */
     val metroPhotoSlideshow = BoolPref("pref_metroPhotoSlideshow", true)
     /** Also set the phone's home screen wallpaper when applying a Start background photo. */

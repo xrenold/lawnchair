@@ -132,12 +132,41 @@ class BackgroundPreviewActivity : Activity() {
         list.post { setPan(0f) }
         hint.postDelayed({ hint.animate().alpha(0f).setDuration(400).start() }, 2600)
 
+        if (gradientMode) {
+            hint.text = "Shuffle for a new gradient"
+            shuffleGradient()
+            return
+        }
         val uri = intent.data
         if (uri == null) {
             finish()
             return
         }
         loadPhoto(uri)
+    }
+
+    /** Generated gradient instead of a photo (Background › Generate gradient). */
+    private val gradientMode: Boolean get() = intent.getBooleanExtra(EXTRA_GRADIENT, false)
+
+    /** Makes a new random gradient exactly the size Start's background needs. */
+    private fun shuffleGradient() {
+        val bounds = if (android.os.Build.VERSION.SDK_INT >= 30) {
+            windowManager.currentWindowMetrics.bounds
+        } else {
+            android.graphics.Rect(0, 0, resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+        }
+        val w = (bounds.width() * (1 + ParallaxBackgroundView.TRAVEL_X)).toInt()
+        val h = (bounds.height() * (1 + ParallaxBackgroundView.TRAVEL_Y)).toInt()
+        val seed = System.nanoTime()
+        worker.execute {
+            val bmp = runCatching { app.lawnchair.metro.theme.GradientGen.random(w, h, seed) }.getOrNull()
+            main.post {
+                if (bmp != null) {
+                    photo.setImage(bmp)
+                    scheduleMeasure()
+                }
+            }
+        }
     }
 
     private fun setupTiles() {
@@ -271,6 +300,9 @@ class BackgroundPreviewActivity : Activity() {
             gravity = Gravity.END
             setPadding(0, dp(8f).toInt(), 0, 0)
         }
+        if (gradientMode) {
+            actions.addView(actionButton("shuffle", primary = false) { shuffleGradient() })
+        }
         actions.addView(actionButton("cancel", primary = false) { finish() })
         actions.addView(actionButton("apply", primary = true) { apply() })
         box.addView(actions)
@@ -349,7 +381,7 @@ class BackgroundPreviewActivity : Activity() {
                 } else {
                     crop
                 }
-                ParallaxBackgroundView.file(this).outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+                ParallaxBackgroundView.file(this).outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, if (gradientMode) 96 else 92, it) }
                 // The wallpaper is a bonus: if Android refuses it, the background still applies.
                 if (setWallpaper) wallpaperFailed = runCatching { setHomeWallpaper(crop) }.isFailure
             }.isSuccess
@@ -360,6 +392,7 @@ class BackgroundPreviewActivity : Activity() {
                     return@post
                 }
                 if (wallpaperFailed) Toast.makeText(this, "Couldn't set the phone wallpaper", Toast.LENGTH_SHORT).show()
+                prefs.metroBackgroundKind.set(if (gradientMode) "gradient" else "photo")
                 prefs.metroLegibility.set(level)
                 prefs.metroBackground.set(if (windowStyle) MetroTheme.BG_WINDOW else MetroTheme.BG_WALLPAPER)
                 prefs.metroBackgroundPhoto.set(prefs.metroBackgroundPhoto.get() + 1)
@@ -633,6 +666,14 @@ class BackgroundPreviewActivity : Activity() {
     }
 
     companion object {
+        private const val EXTRA_GRADIENT = "metro_gradient"
+
+        /** Opens the preview with a freshly generated gradient. */
+        @JvmStatic
+        fun startGradient(context: Context) {
+            context.startActivity(Intent(context, BackgroundPreviewActivity::class.java).putExtra(EXTRA_GRADIENT, true))
+        }
+
         /** Opens the preview for a picked photo. */
         @JvmStatic
         fun start(context: Context, uri: Uri) {

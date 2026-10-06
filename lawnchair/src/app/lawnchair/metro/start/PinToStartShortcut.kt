@@ -21,14 +21,12 @@ class PinToStartShortcut(
     override fun onClick(view: View) {
         val component = mItemInfo.targetComponent ?: return
         dismissTaskMenuView()
-        if (MetroTileStore.get(launcher).isPinned(component)) {
-            Toast.makeText(launcher, R.string.metro_already_pinned, Toast.LENGTH_SHORT).show()
-            return
-        }
-        app.lawnchair.metro.data.LayoutLock.guard(launcher) {
-            MetroTileStore.get(launcher).pin(component)
+        val pinned = MetroTileStore.get(launcher).pin(component)
+        if (pinned) {
             // Go back to Start so the new tile is visible, as Windows Phone does.
             launcher.stateManager.goToState(LauncherState.NORMAL)
+        } else {
+            Toast.makeText(launcher, R.string.metro_already_pinned, Toast.LENGTH_SHORT).show()
         }
     }
 

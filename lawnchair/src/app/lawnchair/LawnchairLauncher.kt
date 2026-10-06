@@ -592,12 +592,6 @@ class LawnchairLauncher : QuickstepLauncher() {
         app.lawnchair.metro.widgets.MetroWidgets.stopListening(this)
     }
 
-    override fun onPause() {
-        super.onPause()
-        // Left again before the tiles landed (e.g. a cancelled back gesture): show them as they are.
-        startView?.cancelLanding()
-    }
-
     override fun onStart() {
         super.onStart()
         app.lawnchair.metro.widgets.MetroWidgets.startListening(this)
@@ -612,7 +606,7 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onResume() {
         super.onResume()
         // Back on Start after an app or unlocking: the tiles settle onto Start.
-        if (metroAwayInApp && metroAppList?.isOpen != true) startView?.post { if (hasBeenResumed()) startView?.prepareLanding() }
+        if (metroAwayInApp && metroAppList?.isOpen != true) startView?.post { startView?.playLanding() }
         metroAwayInApp = false
         restartIfPending()
         refreshPredictionContainersFromModel()

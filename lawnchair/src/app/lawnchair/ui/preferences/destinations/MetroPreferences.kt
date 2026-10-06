@@ -47,13 +47,6 @@ fun MetroPreferenceGroups() {
         }
         ExpandAndShrink(visible = startEnabled.state.value) {
             SwitchPreference(
-                adapter = prefs.metroLayoutLocked.getAdapter(),
-                label = "Lock Start layout",
-                description = "No moving, resizing, unpinning, pinning or auto layout. Tile settings still work.",
-            )
-        }
-        ExpandAndShrink(visible = startEnabled.state.value) {
-            SwitchPreference(
                 adapter = prefs.metroShowMoreTiles.getAdapter(),
                 label = "Show more tiles",
                 description = "6 columns of small tiles instead of 4",

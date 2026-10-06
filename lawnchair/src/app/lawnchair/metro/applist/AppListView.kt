@@ -96,7 +96,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private val sectionPositions = HashMap<Char, Int>()
 
     /** Black behind the status bar, and behind the search bar at the bottom. */
-    private val statusStrip = app.lawnchair.metro.start.StatusFade(launcher)
+    private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
     private val searchPanel = View(launcher).apply { setBackgroundColor(Color.BLACK) }
 
     private val background = MetroTheme.background(launcher)
@@ -156,7 +156,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
         list.layoutManager = layoutManager
         list.adapter = adapter
-        list.clipToPadding = false // rows slide under the status bar's fade
+        list.clipToPadding = true // rows never slide under the status bar
         list.overScrollMode = OVER_SCROLL_NEVER
         list.isVerticalScrollBarEnabled = false
         list.itemAnimator = null
@@ -189,14 +189,11 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                 return false
             }
         })
-        // Tapping the top puts the keyboard away; otherwise touches go through to the rows.
-        statusStrip.setOnTouchListener { _, e ->
-            if (!search.hasFocus()) return@setOnTouchListener false
-            if (e.actionMasked == MotionEvent.ACTION_UP) {
+        statusStrip.setOnClickListener {
+            if (search.hasFocus()) {
                 hideKeyboard()
                 updateBack()
             }
-            true
         }
         addView(list, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
@@ -277,7 +274,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     override fun setInsets(insets: Rect) {
         systemInsets.set(insets)
         navInset = insets.bottom
-        (statusStrip.layoutParams as LayoutParams).height = app.lawnchair.metro.start.StatusFade.heightFor(insets.top)
+        (statusStrip.layoutParams as LayoutParams).height = insets.top
         statusStrip.requestLayout()
         list.setPadding(0, insets.top + dp(8f).toInt(), dp(36f).toInt(), 0)
         scrubber.topInset = insets.top + dp(8f)
@@ -527,15 +524,13 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             MotionEvent.ACTION_MOVE -> if (edgeCandidate && !edgeScrubbing) {
                 val dx = abs(ev.x - edgeDownX)
                 val dy = abs(ev.y - edgeDownY)
-                // Decided once, at the first real movement: clearly vertical scrubs, anything
-                // else is a normal scroll (or swipe) for the rest of this touch.
                 if (dy > edgeSlop && dy > dx * 1.5f) {
                     edgeScrubbing = true
                     val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
                     super.dispatchTouchEvent(cancel)
                     cancel.recycle()
                     forwardToScrubber(ev, MotionEvent.ACTION_DOWN)
-                } else if (dx > edgeSlop || dy > edgeSlop) {
+                } else if (dx > edgeSlop) {
                     edgeCandidate = false
                 }
             }
@@ -667,23 +662,18 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             val pkg = info.componentName?.packageName
             if (item.groupId == GROUP_SHORTCUT) {
                 shortcuts.getOrNull(item.itemId)?.let {
-                    app.lawnchair.metro.data.LayoutLock.guard(launcher) {
-                        app.lawnchair.metro.data.MetroShortcuts.pinToStart(launcher, it)
-                        close(animate = true)
-                    }
+                    app.lawnchair.metro.data.MetroShortcuts.pinToStart(launcher, it)
+                    close(animate = true)
                 }
                 return@setOnMenuItemClickListener true
             }
             when (item.itemId) {
                 1 -> {
                     val cn = info.componentName ?: return@setOnMenuItemClickListener true
-                    if (MetroTileStore.get(launcher).isPinned(cn)) {
-                        Toast.makeText(launcher, "Already on Start", Toast.LENGTH_SHORT).show()
+                    if (MetroTileStore.get(launcher).pin(cn)) {
+                        close(animate = true)
                     } else {
-                        app.lawnchair.metro.data.LayoutLock.guard(launcher) {
-                            MetroTileStore.get(launcher).pin(cn)
-                            close(animate = true)
-                        }
+                        Toast.makeText(launcher, "Already on Start", Toast.LENGTH_SHORT).show()
                     }
                 }
                 2 -> launcher.startActivity(

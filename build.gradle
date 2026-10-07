@@ -169,6 +169,8 @@ android {
 
     androidResources {
         generateLocaleConfig true
+        // Metro's depth model is memory-mapped straight from the APK.
+        noCompress.add('tflite')
     }
 
     buildFeatures {
@@ -176,6 +178,13 @@ android {
         buildConfig true
         resValues true
     }
+
+    // Metro's depth model only ships for 64-bit ARM phones; elsewhere backgrounds just have no depth.
+    packagingOptions.jniLibs.excludes += [
+        'lib/armeabi-v7a/libtensorflowlite_jni.so',
+        'lib/x86/libtensorflowlite_jni.so',
+        'lib/x86_64/libtensorflowlite_jni.so',
+    ]
 
     packagingOptions.resources.excludes += [
         "**/*.proto",
@@ -476,6 +485,9 @@ dependencies {
     implementation libs.libsu.service
 
     implementation libs.airbnb.lottie
+
+    // Metro: on-device depth model for layered parallax backgrounds
+    implementation 'org.tensorflow:tensorflow-lite:2.16.1'
 
     // Compose drag and drop library
     implementation libs.reorderable

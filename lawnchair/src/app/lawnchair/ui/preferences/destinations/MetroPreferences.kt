@@ -103,6 +103,7 @@ fun MetroPreferenceGroups() {
                     label = "Use system wallpaper instead",
                     onClick = {
                         ParallaxBackgroundView.file(context).delete()
+                        app.lawnchair.metro.theme.LayeredImage.clear(context)
                         photoVersion.onChange(0)
                     },
                 )

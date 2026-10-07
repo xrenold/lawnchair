@@ -27,6 +27,7 @@ import android.widget.Toast
 import app.lawnchair.LawnchairLauncher
 import app.lawnchair.metro.data.MetroTile
 import app.lawnchair.metro.data.MetroTileStore
+import app.lawnchair.metro.data.LayoutLock
 import app.lawnchair.metro.data.TileSize
 import app.lawnchair.metro.auto.AutoLayout
 import app.lawnchair.metro.data.MetroShortcuts
@@ -77,6 +78,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         onTap = { openAppList() },
         onHoldComplete = { onHoldDone() },
         onHoldProgress = { p, releasing -> showHold(p, releasing) },
+        holdAllowed = { !LayoutLock.isLocked(launcher) },
+        onHoldBlocked = { showLockedBar(null) },
     )
     /**
      * Legibility: an even black layer over the background (photo or wallpaper), stronger the
@@ -84,8 +87,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      * covers the app list when that slides in.
      */
     private val dimView = View(launcher).apply { setBackgroundColor(Color.BLACK); alpha = 0f }
-    /** Solid black behind the status bar: tiles never scroll underneath it. */
-    private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
+    /** Black behind the status bar, fading out below it: tiles dissolve as they scroll up. */
+    private val statusStrip = StatusFade(launcher)
 
     private val background = MetroTheme.background(launcher)
     private val windowMode = background == MetroTheme.BG_WINDOW
@@ -168,7 +171,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** Status bar and gesture bar insets, delivered by Launcher's DragLayer. */
     override fun setInsets(insets: Rect) {
         systemInsets.set(insets)
-        (statusStrip.layoutParams as LayoutParams).height = insets.top
+        (statusStrip.layoutParams as LayoutParams).height = StatusFade.heightFor(insets.top)
         statusStrip.requestLayout()
         grid.topPadding = insets.top
         grid.bottomInset = insets.bottom
@@ -197,11 +200,30 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             }, 1200)
         }
         post { askInfoPermissions() }
+        LayoutLock.showLockedBar = { onUnlock -> showLockedBar(onUnlock) }
         removeCallbacks(liveTicker)
         postDelayed(liveTicker, LIVE_TICK_MS)
     }
 
+    /**
+     * Start stopped being shown (an app is in front, or the screen is off): the flip scheduler
+     * and the info tiles' minute tick and weather checks stop entirely, and pick up again when
+     * Start is back.
+     */
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (!isAttachedToWindow) return
+        removeCallbacks(liveTicker)
+        if (visibility == View.VISIBLE) {
+            InfoTiles.start(launcher)
+            postDelayed(liveTicker, LIVE_TICK_MS)
+        } else {
+            InfoTiles.stop()
+        }
+    }
+
     override fun onDetachedFromWindow() {
+        LayoutLock.showLockedBar = null
         removeCallbacks(liveTicker)
         LiveTileData.removeListener(liveListener)
         InfoTiles.removeListener(infoListener)
@@ -476,7 +498,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private val liveTicker = object : Runnable {
         override fun run() {
             turnPhotoTiles()
-            // Sleeps (checks every few seconds) while Start is hidden or nothing on it is live.
+            // Sleeps (checks every few seconds) while nothing on Start is live; stops altogether
+            // while Start isn't shown (see onWindowVisibilityChanged).
             val idle = !prefs.metroLiveTiles.get() || !isShown || !hasWindowFocus() ||
                 (0 until grid.childCount).none { (grid.getChildAt(it) as? TileView)?.let { t -> t.hasBackFace || t.showingBack } == true }
             postDelayed(this, if (idle) 5000L else LIVE_TICK_MS + random.nextInt(600))
@@ -724,7 +747,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             return
         }
         if (view.infoKind == InfoKind.CLOCK) {
-            val pi = InfoTiles.alarm?.showIntent
+            // The alarm's own screen when it's an activity; otherwise just open the clock app.
+            val pi = InfoTiles.alarm?.showIntent?.takeIf { android.os.Build.VERSION.SDK_INT < 31 || it.isActivity }
             if (pi != null) {
                 val opts = if (android.os.Build.VERSION.SDK_INT >= 34) {
                     ActivityOptions.makeBasic()
@@ -752,13 +776,16 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private fun showTileMenu(view: View) {
         val tile = (view as TileHolder).tile
         val isWidget = tile.kind == MetroTile.Kind.WIDGET
+        val locked = LayoutLock.isLocked(launcher)
         val menu = PopupMenu(launcher, view, Gravity.END)
-        val sizes = menu.menu.addSubMenu(Menu.NONE, MENU_RESIZE, 0, "Resize")
-        TileSize.entries.forEachIndexed { i, size ->
-            if (isWidget && size == TileSize.SMALL) return@forEachIndexed // widgets need room
-            sizes.add(GROUP_SIZE, i, i, size.label).setCheckable(true).isChecked = size == tile.size
+        if (!locked) {
+            val sizes = menu.menu.addSubMenu(Menu.NONE, MENU_RESIZE, 0, "Resize")
+            TileSize.entries.forEachIndexed { i, size ->
+                if (isWidget && size == TileSize.SMALL) return@forEachIndexed // widgets need room
+                sizes.add(GROUP_SIZE, i, i, size.label).setCheckable(true).isChecked = size == tile.size
+            }
+            sizes.setGroupCheckable(GROUP_SIZE, true, true)
         }
-        sizes.setGroupCheckable(GROUP_SIZE, true, true)
 
         if (!isWidget) {
             val colors = menu.menu.addSubMenu(Menu.NONE, MENU_COLOR, 1, "Tile color")
@@ -783,9 +810,12 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         if (isPhotos) {
             menu.menu.add(Menu.NONE, MENU_SLIDESHOW, 2, if (prefs.metroPhotoSlideshow.get()) "Turn photo slideshow off" else "Turn photo slideshow on")
         }
-        menu.menu.add(Menu.NONE, MENU_LOCK, 2, if (tile.locked) "Unlock tile" else "Lock tile (auto layout keeps it)")
-        menu.menu.add(Menu.NONE, MENU_UNPIN, 3, if (isWidget) "Remove widget" else "Unpin from Start")
+        if (!locked) {
+            menu.menu.add(Menu.NONE, MENU_LOCK, 2, if (tile.locked) "Unlock tile" else "Lock tile (auto layout keeps it)")
+            menu.menu.add(Menu.NONE, MENU_UNPIN, 3, if (isWidget) "Remove widget" else "Unpin from Start")
+        }
         if (!isWidget) menu.menu.add(Menu.NONE, MENU_INFO, 4, "App info")
+        if (locked) menu.menu.add(Menu.NONE, MENU_UNLOCK_LAYOUT, 5, "Unlock layout")
 
         menu.setOnMenuItemClickListener { item ->
             when {
@@ -826,6 +856,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     grid.animateReflow()
                     invalidate()
                 }
+                item.itemId == MENU_UNLOCK_LAYOUT -> {
+                    LayoutLock.setLocked(launcher, false)
+                    Toast.makeText(launcher, "Start unlocked", Toast.LENGTH_SHORT).show()
+                }
                 item.itemId == MENU_INFO -> {
                     launcher.startActivity(
                         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
@@ -855,12 +889,18 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             topMargin = lastTouchY.toInt()
         })
         val menu = PopupMenu(launcher, anchor)
+        val locked = LayoutLock.isLocked(launcher)
         menu.menu.add(0, 1, 0, "Add widget")
-        menu.menu.add(0, 2, 1, "Wallpaper")
-        menu.menu.add(0, 3, 2, "Metro settings")
+        menu.menu.add(0, 4, 1, if (locked) "Unlock Start layout" else "Lock Start layout")
+        menu.menu.add(0, 2, 2, "Wallpaper")
+        menu.menu.add(0, 3, 3, "Metro settings")
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                1 -> WidgetPicker.show(launcher) { info -> MetroWidgets.add(launcher, info) }
+                1 -> LayoutLock.guard(launcher) { WidgetPicker.show(launcher) { info -> MetroWidgets.add(launcher, info) } }
+                4 -> {
+                    LayoutLock.setLocked(launcher, !locked)
+                    Toast.makeText(launcher, if (locked) "Start unlocked" else "Start layout locked", Toast.LENGTH_SHORT).show()
+                }
                 2 -> runCatching {
                     launcher.startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper"))
                 }
@@ -897,6 +937,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** Picks [view] up: it lifts slightly and follows the finger until released. */
     private fun beginDrag(view: View) {
         if (drag != null) return
+        // Locked layout: a long press opens the tile's menu instead of picking it up.
+        if (LayoutLock.isLocked(launcher)) {
+            showTileMenu(view)
+            return
+        }
         val h = view as TileHolder
         val d = Drag(view, h.downX, h.downY, h.downRawX, h.downRawY)
         drag = d
@@ -1035,6 +1080,30 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             row >= rows * 0.6 -> MetroUsage.Region.BOTTOM
             else -> MetroUsage.Region.TOP
         }
+    }
+
+    /**
+     * "Start is locked" at the bottom of whatever is on screen (Start or the app list), with an
+     * Unlock button. [onUnlock] finishes what was blocked (a pin) after unlocking; without it,
+     * the button just unlocks.
+     */
+    private fun showLockedBar(onUnlock: (() -> Unit)?) {
+        val host: FrameLayout = launcher.metroAppList?.takeIf { it.isOpen } ?: this
+        undoBar.show(
+            host,
+            message = "Start is locked",
+            hint = null,
+            onUndo = {
+                if (onUnlock != null) {
+                    onUnlock()
+                } else {
+                    LayoutLock.setLocked(launcher, false)
+                    Toast.makeText(launcher, "Start unlocked", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onHint = {},
+            actionLabel = "UNLOCK",
+        )
     }
 
     // ---- Auto layout --------------------------------------------------------------------
@@ -1252,6 +1321,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_LOCK = 104
         private const val MENU_SLIDESHOW = 105
         private const val MENU_LIVE = 106
+        private const val MENU_UNLOCK_LAYOUT = 107
         private const val GROUP_LIVE = 3
         private const val REQUEST_INFO_PERMISSIONS = 7400
         private const val GROUP_SIZE = 1

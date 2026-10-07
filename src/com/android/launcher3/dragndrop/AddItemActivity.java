@@ -340,6 +340,14 @@ public class AddItemActivity extends BaseActivity
     public void onPlaceAutomaticallyClick(View v) {
         if (mRequest.getRequestType() == PinItemRequest.REQUEST_TYPE_SHORTCUT) {
             ShortcutInfo shortcutInfo = mRequest.getShortcutInfo();
+            if (app.lawnchair.metro.MetroMode.isStartEnabled(this)
+                    && app.lawnchair.metro.data.LayoutLock.isLocked(this)) {
+                // Metro: Start's layout is locked, so nothing new is pinned.
+                android.widget.Toast.makeText(this, "Start is locked. Unlock it to add tiles.",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                mSlideInView.close(/* animate= */ true);
+                return;
+            }
             if (app.lawnchair.metro.MetroMode.isStartEnabled(this)) {
                 // Metro: pinned shortcuts become Start tiles.
                 app.lawnchair.metro.data.MetroShortcuts.added(this, shortcutInfo);

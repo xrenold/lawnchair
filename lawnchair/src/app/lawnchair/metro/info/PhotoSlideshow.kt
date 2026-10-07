@@ -44,6 +44,9 @@ class PhotoSlideshow(private val view: View) {
     private var index = 0
     private var current: Bitmap? = null
     private var next: Bitmap? = null
+    /** Where the faces are in [current] and [next] (null = none found). */
+    private var currentFaces: FloatArray? = null
+    private var nextFaces: FloatArray? = null
     private var loading = false
 
     private var phase = Phase.DRIFT
@@ -62,21 +65,64 @@ class PhotoSlideshow(private val view: View) {
             next = null
             return
         }
-        if (current == null) {
-            index = 0
-            load(list[0]) { bmp ->
-                current = bmp
-                phase = Phase.DRIFT
-                phaseStart = System.currentTimeMillis()
-                view.invalidate()
-                preloadNext()
-            }
+        if (current == null) loadFirst()
+    }
+
+    /** True while the first photo waits for the tile to be laid out. */
+    private var waitingForSize = false
+
+    private fun loadFirst() {
+        // Before layout the tile has no size yet, and the photo would be decoded far too small.
+        if (view.width == 0 || view.height == 0) {
+            waitingForSize = true
+            return
+        }
+        waitingForSize = false
+        index = 0
+        currentFaces = InfoTiles.photoFaces[uris[0]]
+        load(uris[0]) { bmp ->
+            current = bmp
+            phase = Phase.DRIFT
+            phaseStart = System.currentTimeMillis()
+            view.invalidate()
+            preloadNext()
+        }
+    }
+
+    /**
+     * The tile got its size, or changed size (resized from medium to wide…): load the first
+     * photo now, or decode the current one again if it's now too small to stay sharp.
+     */
+    fun onSizeChanged() {
+        if (uris.isEmpty() || view.width == 0 || view.height == 0) return
+        if (waitingForSize || current == null) {
+            if (!loading) loadFirst() else view.post { onSizeChanged() }
+            return
+        }
+        val cur = current ?: return
+        val need = (maxOf(view.width, view.height) * 1.12f).coerceAtMost(1600f)
+        if (minOf(cur.width, cur.height) >= need * 0.85f) return
+        if (loading) {
+            view.postDelayed({ onSizeChanged() }, 200)
+            return
+        }
+        val uri = uris.getOrNull(index % uris.size) ?: return
+        next = null // preloaded at the old size
+        load(uri) { bmp ->
+            if (bmp != null) current = bmp
+            view.invalidate()
+            preloadNext()
         }
     }
 
     private fun preloadNext() {
         if (uris.size < 2 || next != null) return
-        load(uris[(index + 1) % uris.size]) { next = it }
+        if (view.width == 0) return
+        val uri = uris[(index + 1) % uris.size]
+        load(uri) {
+            next = it
+            nextFaces = InfoTiles.photoFaces[uri]
+        }
     }
 
     private fun load(uri: Uri, done: (Bitmap?) -> Unit) {
@@ -121,6 +167,7 @@ class PhotoSlideshow(private val view: View) {
     private fun advance() {
         val nxt = next ?: return
         current = nxt
+        currentFaces = nextFaces
         next = null
         index = (index + 1) % uris.size.coerceAtLeast(1)
         preloadNext()
@@ -158,14 +205,17 @@ class PhotoSlideshow(private val view: View) {
 
     /** Draws the slideshow; returns false to show the tile's normal face (no photo, or resting). */
     fun draw(canvas: Canvas, w: Float, h: Float): Boolean {
-        val cur = current ?: return false
-        if (phase == Phase.ICON) return false
+        val cur = current
+        if (cur == null || phase == Phase.ICON) {
+            setSlowFrameRate(false)
+            return false
+        }
         val now = System.currentTimeMillis()
         val elapsed = now - phaseStart
         var animating = false
         when (phase) {
             Phase.DRIFT -> {
-                drawKenBurns(canvas, cur, w, h, (elapsed / DRIFT_MS.toFloat()).coerceIn(0f, 1f), index, 255)
+                drawKenBurns(canvas, cur, currentFaces, w, h, (elapsed / DRIFT_MS.toFloat()).coerceIn(0f, 1f), index, 255)
                 if (elapsed >= DRIFT_MS) {
                     phase = if (next != null) Phase.FADE else Phase.STILL
                     phaseStart = now
@@ -174,14 +224,14 @@ class PhotoSlideshow(private val view: View) {
                 if (next == null) preloadNext()
             }
             Phase.FADE -> {
-                drawKenBurns(canvas, cur, w, h, 1f, index, 255)
+                drawKenBurns(canvas, cur, currentFaces, w, h, 1f, index, 255)
                 val nxt = next
                 if (nxt == null) {
                     phase = Phase.STILL
                     phaseStart = now
                 } else {
                     val a = (elapsed / FADE_MS.toFloat()).coerceIn(0f, 1f)
-                    drawKenBurns(canvas, nxt, w, h, 0f, index + 1, (a * 255).toInt())
+                    drawKenBurns(canvas, nxt, nextFaces, w, h, 0f, index + 1, (a * 255).toInt())
                     if (a >= 1f) {
                         advance()
                         phase = Phase.STILL
@@ -191,30 +241,69 @@ class PhotoSlideshow(private val view: View) {
                     }
                 }
             }
-            Phase.STILL -> drawKenBurns(canvas, cur, w, h, 0f, index, 255)
+            Phase.STILL -> drawKenBurns(canvas, cur, currentFaces, w, h, 0f, index, 255)
             Phase.ICON -> Unit
         }
         // Only the drift and the fade need frames (about 30 a second is plenty); still and
         // resting phases don't redraw at all. Off screen, just check back now and then.
         if (animating) {
-            if (view.getLocalVisibleRect(visible)) view.postInvalidateDelayed(33) else view.postInvalidateDelayed(500)
+            if (view.getLocalVisibleRect(visible)) view.postInvalidateDelayed(33) else view.postInvalidateDelayed(2000)
         }
+        // Only while the tile itself is still: a flip or landing on it should stay smooth.
+        setSlowFrameRate(animating && view.rotationX == 0f && view.scaleX == 1f)
         return true
     }
 
-    /** Centre-crop with a very slow zoom (1.06 → 1.09) and a short pan that varies by photo. */
-    private fun drawKenBurns(canvas: Canvas, bmp: Bitmap, w: Float, h: Float, t: Float, seed: Int, alpha: Int) {
+    private var slowRate = false
+
+    /** The slideshow is being switched off: give the tile its normal frame rate back. */
+    fun release() = setSlowFrameRate(false)
+
+    /**
+     * The drift and fade are slow, so they ask the display for about 30 frames a second instead
+     * of 120. With nothing else moving, the screen can then run at a lower refresh rate, which
+     * saves power (Android 15 and later; ignored before).
+     */
+    private fun setSlowFrameRate(on: Boolean) {
+        if (on == slowRate || android.os.Build.VERSION.SDK_INT < 35) return
+        slowRate = on
+        runCatching { view.setRequestedFrameRate(if (on) 30f else View.REQUESTED_FRAME_RATE_CATEGORY_DEFAULT) }
+    }
+
+    /**
+     * Crop with a very slow zoom (1.06 → 1.09) and a short pan that varies by photo. With faces,
+     * the crop is placed so they sit in the upper part of the tile (a group kept together, as far
+     * as the tile allows), and the pan drifts around them. Without, portrait photos crop a
+     * little above the middle, where heads usually are, and landscape photos crop centred.
+     */
+    private fun drawKenBurns(canvas: Canvas, bmp: Bitmap, faces: FloatArray?, w: Float, h: Float, t: Float, seed: Int, alpha: Int) {
         val base = maxOf(w / bmp.width, h / bmp.height)
         val zoom = 1.06f + 0.03f * t
         val s = base * zoom
-        val extraX = bmp.width * s - w
-        val extraY = bmp.height * s - h
+        val pw = bmp.width * s
+        val ph = bmp.height * s
+        val extraX = pw - w
+        val extraY = ph - h
         val dirX = if (seed % 2 == 0) 1f else -1f
         val dirY = if ((seed / 2) % 2 == 0) 1f else -1f
-        val px = 0.5f + 0.15f * dirX * (t - 0.5f)
-        val py = 0.5f + 0.15f * dirY * (t - 0.5f)
+        val pan = 0.15f * (t - 0.5f)
+        val restX: Float
+        val restY: Float
+        if (faces != null) {
+            val fcx = (faces[0] + faces[2]) / 2f * pw
+            val ft = faces[1] * ph
+            val fb = faces[3] * ph
+            restX = fcx - w / 2f
+            // Faces centred around 40% down the tile; a group too tall for the tile keeps the tops of heads in.
+            restY = if (fb - ft < h * 0.8f) (ft + fb) / 2f - h * 0.4f else ft - h * 0.08f
+        } else {
+            restX = extraX / 2f
+            restY = if (bmp.height > bmp.width) ph * 0.38f - h / 2f else extraY / 2f
+        }
+        val ox = (restX + extraX * pan * dirX).coerceIn(0f, extraX.coerceAtLeast(0f))
+        val oy = (restY + extraY * pan * dirY).coerceIn(0f, extraY.coerceAtLeast(0f))
         m.setScale(s, s)
-        m.postTranslate(-extraX * px, -extraY * py)
+        m.postTranslate(-ox, -oy)
         val shader = shaders.getOrPut(bmp) { BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
         shader.setLocalMatrix(m)
         paint.shader = shader

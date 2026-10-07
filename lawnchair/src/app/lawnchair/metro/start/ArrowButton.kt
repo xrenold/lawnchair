@@ -34,6 +34,9 @@ class ArrowButton(
     private val onHoldComplete: () -> Unit,
     /** Hold progress 0..1; [releasing] is true while it winds back down (let go, or done). */
     private val onHoldProgress: (progress: Float, releasing: Boolean) -> Unit = { _, _ -> },
+    /** False while Start's layout is locked: holding then calls [onHoldBlocked] instead. */
+    private val holdAllowed: () -> Boolean = { true },
+    private val onHoldBlocked: () -> Unit = {},
 ) : View(context) {
 
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -58,6 +61,12 @@ class ArrowButton(
     private var triggered = false
 
     private val startHold = Runnable {
+        if (!holdAllowed()) {
+            triggered = true // the finger lifting shouldn't open the app list
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            onHoldBlocked()
+            return@Runnable
+        }
         holding = true
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         holdAnim?.cancel()

@@ -33,7 +33,6 @@ import app.lawnchair.metro.auto.AutoLayout
 import app.lawnchair.metro.data.MetroShortcuts
 import app.lawnchair.metro.data.MetroUsage
 import app.lawnchair.metro.widgets.MetroWidgets
-import app.lawnchair.metro.widgets.WidgetPicker
 import app.lawnchair.metro.live.LiveInfo
 import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.live.LiveTileData
@@ -903,7 +902,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         invalidate()
     }
 
-    /** Long-press on empty Start space: add a widget, wallpaper, settings. */
+    /** Long-press on empty Start space: lock or unlock the layout, settings. */
     private fun showStartMenu() {
         val anchor = View(launcher)
         addView(anchor, LayoutParams(1, 1).apply {
@@ -912,19 +911,13 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         })
         val menu = PopupMenu(launcher, anchor)
         val locked = LayoutLock.isLocked(launcher)
-        menu.menu.add(0, 1, 0, "Add widget")
-        menu.menu.add(0, 4, 1, if (locked) "Unlock Start layout" else "Lock Start layout")
-        menu.menu.add(0, 2, 2, "Wallpaper")
-        menu.menu.add(0, 3, 3, "Pane settings")
+        menu.menu.add(0, 4, 0, if (locked) "Unlock Start layout" else "Lock Start layout")
+        menu.menu.add(0, 3, 1, "Pane settings")
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                1 -> LayoutLock.guard(launcher) { WidgetPicker.show(launcher) { info -> MetroWidgets.add(launcher, info) } }
                 4 -> {
                     LayoutLock.setLocked(launcher, !locked)
                     Toast.makeText(launcher, if (locked) "Start unlocked" else "Start layout locked", Toast.LENGTH_SHORT).show()
-                }
-                2 -> runCatching {
-                    launcher.startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper"))
                 }
                 3 -> launcher.startActivity(
                     app.lawnchair.ui.preferences.PreferenceActivity.createIntent(

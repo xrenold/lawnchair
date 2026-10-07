@@ -171,7 +171,12 @@ object InfoTiles {
     fun permissionFor(kind: InfoKind): String? = when (kind) {
         InfoKind.CALENDAR -> Manifest.permission.READ_CALENDAR
         InfoKind.WEATHER -> Manifest.permission.ACCESS_COARSE_LOCATION
-        InfoKind.PHOTOS -> if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+        // The Play build reads only picked photos (see PhotoPicks): no permission to ask for.
+        InfoKind.PHOTOS -> when {
+            PhotoPicks.pickerOnly -> null
+            Build.VERSION.SDK_INT >= 33 -> Manifest.permission.READ_MEDIA_IMAGES
+            else -> Manifest.permission.READ_EXTERNAL_STORAGE
+        }
         InfoKind.CLOCK -> null
     }
 
@@ -358,18 +363,55 @@ object InfoTiles {
     // ---- Photos ------------------------------------------------------------------------------
 
     /** Full photo access, or Android 14's "selected photos" access. */
-    fun hasPhotoAccess(context: Context): Boolean =
+    fun hasPhotoAccess(context: Context): Boolean = if (PhotoPicks.pickerOnly) {
+        PhotoPicks.count(context) > 0
+    } else {
         hasPermission(context, permissionFor(InfoKind.PHOTOS)!!) ||
             (Build.VERSION.SDK_INT >= 34 && hasPermission(context, "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"))
+    }
 
     fun refreshPhotos() {
         val app = appContext ?: return
-        if (!hasPhotoAccess(app)) return
+        if (!hasPhotoAccess(app)) {
+            if (photos.isNotEmpty()) {
+                photos = emptyList()
+                notifyChanged()
+            }
+            return
+        }
         photosAt = System.currentTimeMillis()
         photoWorker.execute {
-            photos = runCatching { queryPhotos(app) }.getOrDefault(photos)
+            photos = runCatching { if (PhotoPicks.pickerOnly) pickedPhotos(app) else queryPhotos(app) }.getOrDefault(photos)
             notifyChanged()
         }
+    }
+
+    /** Picked photos changed: load them now rather than at the next 15-minute rescan. */
+    fun reloadPhotos() = main.post { refreshPhotos() }
+
+    /**
+     * Play build: the photos the user picked (see PhotoPicks), all of them, in a fresh varied
+     * order each time. Quality checks only supply the shape and faces; nothing picked is left out.
+     */
+    private fun pickedPhotos(context: Context): List<Uri> {
+        class Picked(val uri: Uri, val q: PhotoQuality.Result?)
+        val all = PhotoPicks.uris(context).shuffled().map { uri ->
+            // Keys apart from MediaStore ids, so the quality cache can't mix the two up.
+            val key = (1L shl 40) or (uri.toString().hashCode().toLong() and 0xffffffffL)
+            Picked(uri, PhotoQuality.evaluate(context, key, uri))
+        }
+        val ordered = ArrayList<Picked>()
+        val left = all.toMutableList()
+        if (left.isNotEmpty()) ordered += left.removeAt(0)
+        while (left.isNotEmpty()) {
+            val prev = ordered.last().q
+            val next = if (prev == null) left.first() else left.maxByOrNull { it.q?.let { q -> PhotoQuality.difference(q, prev) } ?: 0 }!!
+            left.remove(next)
+            ordered += next
+        }
+        landscapePhotos = ordered.filter { it.q?.landscape == true }.map { it.uri }.toSet()
+        photoFaces = ordered.mapNotNull { p -> p.q?.faces?.let { p.uri to it } }.toMap()
+        return ordered.map { it.uri }
     }
 
     /** Where the faces are in each photo that has any (see PhotoQuality.Result.faces). */

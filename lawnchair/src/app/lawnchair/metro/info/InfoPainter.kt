@@ -23,8 +23,8 @@ import java.util.Locale
  */
 class InfoPainter(private val context: Context) {
 
-    private val light = Typeface.create("sans-serif-light", Typeface.NORMAL)
-    private val regular = Typeface.create("sans-serif", Typeface.NORMAL)
+    private val light = app.lawnchair.metro.theme.PaneFonts.light
+    private val regular = app.lawnchair.metro.theme.PaneFonts.regular
     private val big = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { typeface = light }
     private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { typeface = regular }
     private val bar = Paint(Paint.ANTI_ALIAS_FLAG)

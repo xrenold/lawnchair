@@ -107,6 +107,12 @@ class PreferenceManager @Inject constructor(
     val metroLayoutLocked = BoolPref("pref_metroLayoutLocked", false)
     /** Photos tile slideshow on/off. */
     val metroPhotoSlideshow = BoolPref("pref_metroPhotoSlideshow", true)
+
+    /** Play build: photos picked for the Photos tile (content URIs, one per line). */
+    val metroPickedPhotos = StringPref("pref_metroPickedPhotos", "")
+
+    /** Pane's first-run setup has been shown (or skipped). */
+    val paneOnboarded = BoolPref("pref_paneOnboarded", false)
     /** Also set the phone's home screen wallpaper when applying a Start background photo. */
     val metroSetSystemWallpaper = BoolPref("pref_metroSetSystemWallpaper", true)
     /** Calendar tile: ids of calendars to hide (comma-separated). */

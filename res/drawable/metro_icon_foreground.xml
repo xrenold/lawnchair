@@ -1,17 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Metro launcher icon: a small Start screen of white tiles. 108dp adaptive canvas,
-     artwork kept inside the 66dp safe zone (21..87). -->
+<!-- Pane icon, "cluster": a tiny Start screen (medium, small, wide) with the lower small tile
+     caught mid-flip. 108dp adaptive canvas; sized so it sits in the visible 72dp the same way
+     it does in the brand mockup. Also used as the themed (monochrome) layer. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <!-- medium tile -->
-    <path android:fillColor="#FFFFFFFF" android:pathData="M33,33h20v20h-20z" />
-    <!-- two small tiles -->
-    <path android:fillColor="#FFFFFFFF" android:pathData="M55,33h9v9h-9z" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M66,33h9v9h-9z" />
-    <path android:fillColor="#CCFFFFFF" android:pathData="M55,44h20v9h-20z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M38.33,38.33H58.33V58.33H38.33Z" />
+    <!-- small tile -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M61,38.33H69.67V47H61Z" />
+    <!-- small tile mid-flip -->
+    <path android:fillColor="#B3FFFFFF" android:pathData="M62.67,51.67L68,51.67L69.67,56.33L61,56.33Z" />
     <!-- wide tile -->
-    <path android:fillColor="#FFFFFFFF" android:pathData="M33,55h42v20h-42z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M38.33,61H69.67V69.67H38.33Z" />
 </vector>

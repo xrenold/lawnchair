@@ -191,7 +191,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 val latest = app.lawnchair.metro.CrashLog.reports(launcher).firstOrNull()?.first ?: return@postDelayed
                 undoBar.show(
                     this,
-                    message = "Metro stopped unexpectedly",
+                    message = "Pane stopped unexpectedly",
                     hint = null,
                     onUndo = { app.lawnchair.metro.CrashLog.share(launcher, latest) },
                     onHint = {},
@@ -199,7 +199,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 )
             }, 1200)
         }
-        post { askInfoPermissions() }
+        // First run: Pane's setup explains and asks for what it needs; afterwards, Start asks
+        // only for what a newly made info tile needs.
+        post {
+            if (!prefs.paneOnboarded.get()) app.lawnchair.metro.setup.PaneSetupActivity.start(launcher) else askInfoPermissions()
+        }
         LayoutLock.showLockedBar = { onUnlock -> showLockedBar(onUnlock) }
         removeCallbacks(liveTicker)
         postDelayed(liveTicker, LIVE_TICK_MS)
@@ -301,6 +305,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      * photos). Each permission is asked at most once; tiles fall back to their icon without it.
      */
     private fun askInfoPermissions() {
+        // First run: Pane's setup asks for these itself, with an explanation for each.
+        if (!prefs.paneOnboarded.get()) return
         val kinds = grid.tiles.mapNotNull { (it as? TileView)?.infoKind }.toSet()
         val store = launcher.getSharedPreferences("metro_info", Context.MODE_PRIVATE)
         val needed = kinds.mapNotNull { InfoTiles.permissionFor(it) }
@@ -815,6 +821,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         }
         val isPhotos = (view as? TileView)?.infoKind == InfoKind.PHOTOS
         if (isPhotos) {
+            if (app.lawnchair.metro.info.PhotoPicks.pickerOnly) {
+                val have = app.lawnchair.metro.info.PhotoPicks.count(launcher) > 0
+                menu.menu.add(Menu.NONE, MENU_PICK_PHOTOS, 2, if (have) "Choose new photos" else "Choose photos")
+                if (have) menu.menu.add(Menu.NONE, MENU_ADD_PHOTOS, 2, "Add photos")
+            }
             menu.menu.add(Menu.NONE, MENU_SLIDESHOW, 2, if (prefs.metroPhotoSlideshow.get()) "Turn photo slideshow off" else "Turn photo slideshow on")
         }
         if (!locked) {
@@ -835,6 +846,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     val kind = listOf(InfoKind.CALENDAR, InfoKind.PHOTOS, InfoKind.WEATHER, InfoKind.CLOCK)[item.itemId]
                     InfoTiles.setApp(launcher, kind, tile.component.packageName) // Start reloads
                 }
+                item.itemId == MENU_PICK_PHOTOS -> app.lawnchair.metro.info.PhotoPicks.open(launcher, replace = true)
+                item.itemId == MENU_ADD_PHOTOS -> app.lawnchair.metro.info.PhotoPicks.open(launcher, replace = false)
                 item.itemId == MENU_SLIDESHOW -> {
                     prefs.metroPhotoSlideshow.set(!prefs.metroPhotoSlideshow.get())
                     (view as? TileView)?.infoChanged()
@@ -902,7 +915,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         menu.menu.add(0, 1, 0, "Add widget")
         menu.menu.add(0, 4, 1, if (locked) "Unlock Start layout" else "Lock Start layout")
         menu.menu.add(0, 2, 2, "Wallpaper")
-        menu.menu.add(0, 3, 3, "Metro settings")
+        menu.menu.add(0, 3, 3, "Pane settings")
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> LayoutLock.guard(launcher) { WidgetPicker.show(launcher) { info -> MetroWidgets.add(launcher, info) } }
@@ -1331,6 +1344,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_SLIDESHOW = 105
         private const val MENU_LIVE = 106
         private const val MENU_UNLOCK_LAYOUT = 107
+        private const val MENU_PICK_PHOTOS = 108
+        private const val MENU_ADD_PHOTOS = 109
         private const val GROUP_LIVE = 3
         private const val REQUEST_INFO_PERMISSIONS = 7400
         private const val GROUP_SIZE = 1

@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import app.lawnchair.metro.live.LiveTileData
+import app.lawnchair.util.isDefaultLauncher
 import app.lawnchair.metro.start.ParallaxBackgroundView
 import app.lawnchair.ui.preferences.components.controls.ClickablePreference
 import app.lawnchair.metro.theme.MetroTheme
@@ -28,18 +29,20 @@ fun MetroPreferenceGroups() {
     val prefs = preferenceManager()
     val startEnabled = prefs.metroTiles.getAdapter()
 
+    SetupPreferenceGroup(visible = startEnabled.state.value)
+
     PreferenceGroup(heading = "Start") {
         SwitchPreference(
             adapter = startEnabled,
-            label = "Metro Start screen",
-            description = "Windows Phone-style tiles instead of the standard home screen",
+            label = "Pane Start screen",
+            description = "Live tiles instead of the standard home screen",
         )
         ExpandAndShrink(visible = startEnabled.state.value) {
             val ctx = LocalContext.current
             ClickablePreference(
                 label = "Auto layout",
                 subtitle = "Hold the arrow at the end of Start to arrange it from your usage. " +
-                    if (app.lawnchair.metro.data.MetroUsage.hasUsageAccess(ctx)) "Usage access is on." else "Tap to allow usage access for better results.",
+                    if (app.lawnchair.metro.data.MetroUsage.hasUsageAccess(ctx)) "Usage access is on." else "Works better with usage access (see Setup & permissions).",
                 onClick = {
                     ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 },
@@ -66,7 +69,7 @@ fun MetroPreferenceGroups() {
                 entries = listOf(
                     ListPreferenceEntry(MetroTheme.BG_BLACK) { "Black" },
                     ListPreferenceEntry(MetroTheme.BG_WALLPAPER) { "Wallpaper" },
-                    ListPreferenceEntry(MetroTheme.BG_WINDOW) { "Wallpaper through tiles (8.1)" },
+                    ListPreferenceEntry(MetroTheme.BG_WINDOW) { "Wallpaper through tiles" },
                 ),
             )
         }
@@ -93,7 +96,7 @@ fun MetroPreferenceGroups() {
             }
             ClickablePreference(
                 label = if (hasPhoto) "Change background photo" else "Choose background photo",
-                subtitle = "Shown behind the tiles with the Windows Phone 8.1 parallax drift. " +
+                subtitle = "Shown behind the tiles, drifting gently as you scroll. " +
                     "Android doesn't let launchers move the system wallpaper this way.",
                 onClick = {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -159,7 +162,7 @@ fun MetroPreferenceGroups() {
                 entries = listOf(
                     ListPreferenceEntry(MetroTheme.MODE_MONET) { "Material You accent" },
                     ListPreferenceEntry(MetroTheme.MODE_MONET_TONAL) { "Material You mix" },
-                    ListPreferenceEntry(MetroTheme.MODE_CLASSIC) { "Classic Windows Phone accent" },
+                    ListPreferenceEntry(MetroTheme.MODE_CLASSIC) { "Classic accents" },
                 ),
             )
             ExpandAndShrink(visible = colorMode.state.value == MetroTheme.MODE_CLASSIC) {
@@ -177,24 +180,6 @@ fun MetroPreferenceGroups() {
     ExpandAndShrink(visible = startEnabled.state.value) {
         PreferenceGroup(heading = "Info tiles") {
             val ctx = LocalContext.current
-            val needed = listOf(
-                android.Manifest.permission.READ_CALENDAR,
-                android.Manifest.permission.ACCESS_COARSE_LOCATION,
-                if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_IMAGES else android.Manifest.permission.READ_EXTERNAL_STORAGE,
-            )
-            val granted = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(needed.filter { app.lawnchair.metro.info.InfoTiles.hasPermission(ctx, it) }.toSet()) }
-            val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-                granted.value = needed.filter { app.lawnchair.metro.info.InfoTiles.hasPermission(ctx, it) }.toSet()
-            }
-            ClickablePreference(
-                label = "Calendar, weather and photos access",
-                subtitle = if (granted.value.size == needed.size) {
-                    "Your Google Calendar, Weather, Clock and Google Photos tiles are live."
-                } else {
-                    "Tap to allow calendar, approximate location (weather) and photos, so those tiles can come alive."
-                },
-                onClick = { ask.launch(needed.toTypedArray()) },
-            )
             ClickablePreference(
                 label = "Calendars shown",
                 subtitle = "Choose which calendars appear on the calendar tile",
@@ -248,7 +233,11 @@ fun MetroPreferenceGroups() {
             SwitchPreference(
                 adapter = prefs.metroPhotoSlideshow.getAdapter(),
                 label = "Photo slideshow",
-                description = "Google Photos tile shows camera photos from the last 30 days",
+                description = if (app.lawnchair.metro.info.PhotoPicks.pickerOnly) {
+                    "The Photos tile shows the photos you chose"
+                } else {
+                    "The Photos tile shows camera photos from the last 30 days"
+                },
             )
         }
     }
@@ -285,18 +274,6 @@ fun MetroPreferenceGroups() {
                 label = "Live tiles",
                 description = "Tiles flip to show new messages and what's playing",
             )
-            if (!LiveTileData.hasAccess()) {
-                ClickablePreference(
-                    label = "Allow notification access",
-                    subtitle = "Needed for live tiles and counts. On Samsung, also turn on " +
-                        "Settings › Notifications › App icon badges.",
-                    onClick = {
-                        context.startActivity(
-                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                    },
-                )
-            }
             SwitchPreference(
                 adapter = prefs.metroMessagePeek.getAdapter(),
                 label = "Show message text on tiles",
@@ -304,7 +281,43 @@ fun MetroPreferenceGroups() {
             )
         }
     }
+
+    ExpandAndShrink(visible = startEnabled.state.value) {
+        PreferenceGroup(heading = "About Pane") {
+            val ctx = LocalContext.current
+            ClickablePreference(
+                label = "Version",
+                subtitle = com.android.launcher3.BuildConfig.VERSION_NAME,
+                onClick = {},
+            )
+            ClickablePreference(
+                label = "Privacy",
+                subtitle = "Nothing you see in Pane leaves your phone, apart from a weather lookup for your approximate area.",
+                onClick = {
+                    runCatching {
+                        ctx.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                },
+            )
+            ClickablePreference(
+                label = "Credits and licences",
+                subtitle = "Pane is open source (GPL-3.0), built on Lawnchair and Android's Launcher3. Font: Selawik.",
+                onClick = {
+                    val text = runCatching { ctx.assets.open("pane_licenses.txt").bufferedReader().use { it.readText() } }.getOrDefault("")
+                    android.app.AlertDialog.Builder(ctx)
+                        .setTitle("Credits and licences")
+                        .setMessage(text)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                },
+            )
+        }
+    }
 }
+
+private const val PRIVACY_URL = "https://github.com/xrenold/lawnchair/blob/metro/PRIVACY.md"
 
 /** A simple list of launchable apps, with "Automatic" at the top. */
 private object MetroAppPicker {
@@ -327,3 +340,78 @@ private object MetroAppPicker {
             .show()
     }
 }
+
+/**
+ * Setup & permissions: everything Pane can be allowed to do, each with its state, in one place.
+ * Tapping an item opens the matching Android screen; "Run setup again" replays the first-run
+ * story. States are re-read whenever this screen comes back into view.
+ */
+@Composable
+private fun SetupPreferenceGroup(visible: Boolean) {
+    ExpandAndShrink(visible = visible) {
+        val ctx = LocalContext.current
+        val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+        val tick = androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+        androidx.compose.runtime.DisposableEffect(lifecycle) {
+            val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+                if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) tick.intValue++
+            }
+            lifecycle.addObserver(obs)
+            onDispose { lifecycle.removeObserver(obs) }
+        }
+        tick.intValue // read, so the states below refresh on resume
+        val infoTiles = app.lawnchair.metro.info.InfoTiles
+        val picker = app.lawnchair.metro.info.PhotoPicks.pickerOnly
+        val infoNeeded = listOfNotNull(
+            android.Manifest.permission.READ_CALENDAR,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+            infoTiles.permissionFor(app.lawnchair.metro.info.InfoKind.PHOTOS),
+        )
+        val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { tick.intValue++ }
+        fun open(intent: Intent) = runCatching { ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        fun state(on: Boolean, offText: String) = if (on) "On" else offText
+
+        PreferenceGroup(heading = "Setup & permissions") {
+            ClickablePreference(
+                label = "Home app",
+                subtitle = if (ctx.isDefaultLauncher()) "Pane is your home app" else "Tap to make Pane your home app",
+                onClick = { open(Intent(Settings.ACTION_HOME_SETTINGS)) },
+            )
+            ClickablePreference(
+                label = "Notification access",
+                subtitle = state(
+                    androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName),
+                    "Off: live tiles and counts need it. On Samsung, also turn on Settings › Notifications › App icon badges.",
+                ),
+                onClick = { open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+            )
+            val missing = infoNeeded.filter { !infoTiles.hasPermission(ctx, it) }
+            ClickablePreference(
+                label = if (picker) "Calendar and weather" else "Calendar, weather and photos",
+                subtitle = state(missing.isEmpty(), "Some are off. Tap to allow, so those tiles come alive. Weather uses approximate location."),
+                onClick = { if (missing.isNotEmpty()) ask.launch(missing.toTypedArray()) else open(appDetails(ctx)) },
+            )
+            if (picker) {
+                val count = app.lawnchair.metro.info.PhotoPicks.count(ctx)
+                ClickablePreference(
+                    label = "Photos for the Photos tile",
+                    subtitle = if (count == 0) "None chosen yet. Tap to choose some." else "$count chosen. Tap to choose a new set; add more from the tile's menu.",
+                    onClick = { app.lawnchair.metro.info.PhotoPicks.open(ctx, replace = true) },
+                )
+            }
+            ClickablePreference(
+                label = "Usage access",
+                subtitle = state(app.lawnchair.metro.data.MetroUsage.hasUsageAccess(ctx), "Off: auto layout works better with it"),
+                onClick = { open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) },
+            )
+            ClickablePreference(
+                label = "Run setup again",
+                subtitle = "The welcome screens from the first run",
+                onClick = { app.lawnchair.metro.setup.PaneSetupActivity.start(ctx) },
+            )
+        }
+    }
+}
+
+private fun appDetails(ctx: android.content.Context) =
+    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).setData(Uri.fromParts("package", ctx.packageName, null))

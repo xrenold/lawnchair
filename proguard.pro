@@ -32,3 +32,8 @@
 # This shouldn't concern us much
 -dontwarn androidx.window.extensions.**
 -dontwarn androidx.window.sidecar.**
+
+# Pane: the Start screen code is small; keep it whole so release builds behave like the
+# debug builds it's tested as.
+-keep class app.lawnchair.metro.** { *; }
+-keep class app.lawnchair.ui.preferences.destinations.Metro** { *; }

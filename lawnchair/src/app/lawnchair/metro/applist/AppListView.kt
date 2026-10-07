@@ -235,7 +235,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         search.setHintTextColor(0x99FFFFFF.toInt())
         search.setTextColor(Color.WHITE)
         search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
-        search.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        search.typeface = app.lawnchair.metro.theme.PaneFonts.light
         search.isSingleLine = true
         search.imeOptions = EditorInfo.IME_ACTION_GO
         search.setPadding(dp(16f).toInt(), 0, dp(16f).toInt(), 0)
@@ -792,7 +792,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             strokeWidth = dp(1.5f)
         }
         private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            typeface = app.lawnchair.metro.theme.PaneFonts.light
             textSize = sp(22f)
             color = Color.WHITE
         }
@@ -825,12 +825,12 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
         private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val name = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = app.lawnchair.metro.theme.PaneFonts.regular
             textSize = sp(17f)
             color = Color.WHITE
         }
         private val sub = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            typeface = app.lawnchair.metro.theme.PaneFonts.regular
             textSize = sp(13f)
             color = 0x99FFFFFF.toInt()
         }

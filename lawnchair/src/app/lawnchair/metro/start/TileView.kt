@@ -60,7 +60,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        typeface = app.lawnchair.metro.theme.PaneFonts.regular
         textSize = sp(13f)
     }
 
@@ -201,13 +201,13 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     private val onlyNext: Boolean get() = tile.size == TileSize.MEDIUM
 
     private val countPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        typeface = app.lawnchair.metro.theme.PaneFonts.light
     }
     private val headPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        typeface = app.lawnchair.metro.theme.PaneFonts.light
     }
     private val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        typeface = app.lawnchair.metro.theme.PaneFonts.regular
     }
     private val artPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val scrimPaint = Paint()
@@ -723,7 +723,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         val box = cell * 0.42f
         arrow?.let { iconRect.set(pad, pad, pad + box, pad + box); canvas.drawBitmap(it, null, iconRect, navArrowPaint) }
         // Distance beside the arrow, large and light.
-        headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        headPaint.typeface = app.lawnchair.metro.theme.PaneFonts.light
         headPaint.textSize = spK(24f, 17f)
         headPaint.color = on
         val dx = if (arrow != null) pad + box + dp(8f) * k else pad
@@ -740,7 +740,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             val key = "$street|${(w - pad * 2).toInt()}|$lines|$on"
             if (navKey != key) {
                 navKey = key
-                bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                bodyPaint.typeface = app.lawnchair.metro.theme.PaneFonts.regular
                 bodyPaint.textSize = spK(14f, 11.5f)
                 bodyPaint.color = on
                 navStreet = layout(street, bodyPaint, (w - pad * 2).toInt().coerceAtLeast(1), lines)
@@ -863,9 +863,9 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         // Secondary text (the message under a sender) is slightly dimmer, for hierarchy.
         val dim = ColorUtils.setAlphaComponent(bodyPaint.color, 0xC8)
         val rows: List<BackRow> = if (info.isMusic) {
-            headPaint.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            headPaint.typeface = app.lawnchair.metro.theme.PaneFonts.semibold
             headPaint.textSize = spK(if (tile.size == TileSize.MEDIUM) 15f else 17f, 12.5f)
-            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.typeface = app.lawnchair.metro.theme.PaneFonts.regular
             bodyPaint.textSize = spK(13f, 11f)
             bodyPaint.color = dim
             listOf(
@@ -876,9 +876,9 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 ),
             )
         } else if (info.ongoing) {
-            headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            headPaint.typeface = app.lawnchair.metro.theme.PaneFonts.light
             headPaint.textSize = spK(17f, 13f)
-            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.typeface = app.lawnchair.metro.theme.PaneFonts.regular
             bodyPaint.textSize = spK(13f, 11f)
             bodyPaint.color = dim
             listOf(
@@ -889,9 +889,9 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 ),
             )
         } else if (!tile.size.isList) {
-            headPaint.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            headPaint.typeface = app.lawnchair.metro.theme.PaneFonts.light
             headPaint.textSize = spK(17f, 13f)
-            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.typeface = app.lawnchair.metro.theme.PaneFonts.regular
             bodyPaint.textSize = spK(13f, 11f)
             val items = info.items.take(3).ifEmpty { listOf(LiveItem(info.title, info.text, info.image, 0L)) }
             items.map { item ->
@@ -905,9 +905,9 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             }
         } else {
             // List rows: sender in regular weight, message dimmer below it.
-            headPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            headPaint.typeface = app.lawnchair.metro.theme.PaneFonts.regular
             headPaint.textSize = spK(14.5f, 12f)
-            bodyPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            bodyPaint.typeface = app.lawnchair.metro.theme.PaneFonts.regular
             bodyPaint.textSize = spK(13f, 11f)
             bodyPaint.color = dim
             val bodyLines = if (tile.size == TileSize.LARGE) 2 else 1

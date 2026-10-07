@@ -137,11 +137,11 @@ final def isReleaseBuild = ciBuild
         || ciRef.endsWith("-beta")
         || ciRef.endsWith("-rc")
         || ciRef.endsWith("-stable"))
-final def devReleaseName = ciBuild ? "Dev.(#${ciRunNumber})" : "Dev.(${buildCommit})"
-
-final def version = "16"
-final def releaseName = "Beta 1"
-final def versionDisplayName = "${version}.${isReleaseBuild ? releaseName : devReleaseName}"
+// Pane: "1.0 (build 54)" on CI, "1.0 (abc1234)" locally. The version code grows with each CI
+// run, which is what Google Play needs to accept each upload.
+final def version = "1.0"
+final def versionDisplayName = ciBuild ? "${version} (build ${ciRunNumber})" : "${version} (${buildCommit})"
+final def paneVersionCode = 1_000_000 + (ciRunNumber.isInteger() ? ciRunNumber.toInteger() : 0)
 final def majorVersion = versionDisplayName.split("\\.")[0]
 
 final def quickstepMinSdk = "35"
@@ -154,7 +154,7 @@ android {
          * Lawnchair Launcher 16.0 Beta 1.0
          * see https://docs.lawnchair.app/developers/standards/development-workflow#versioning-scheme
          */
-        versionCode 16_00_02_01_00
+        versionCode paneVersionCode
         versionName "${versionDisplayName}"
         buildConfigField "String", "VERSION_DISPLAY_NAME", "\"${versionDisplayName}\""
         buildConfigField "String", "MAJOR_VERSION", "\"${majorVersion}\""
@@ -226,8 +226,8 @@ android {
         }
 
         debug {
-            // Metro: debug builds are the builds we ship, so no ".debug" suffix.
-            resValue("string", "derived_app_name", "Metro")
+            // Pane: debug builds are the test builds we ship, so no ".debug" suffix.
+            resValue("string", "derived_app_name", "Pane")
 
             manifestPlaceholders.quickstepMinSdk = "0"
             manifestPlaceholders.quickstepMaxSdk = "100000"
@@ -236,7 +236,7 @@ android {
         }
 
         release {
-            resValue("string", "derived_app_name", "Lawnchair")
+            resValue("string", "derived_app_name", "Pane")
             minifyEnabled true
             shrinkResources true
             pseudoLocalesEnabled false
@@ -266,21 +266,26 @@ android {
             minSdk = 26
         }
 
+        // Pane ships two ways from the same code: "github" (APK from the GitHub releases page)
+        // and "play" (Google Play). They share a package name; Play's build reads photos only
+        // through the system photo picker, as Play's photo policy requires.
         github {
-            // Metro: own package so it installs alongside (not over) Lawnchair.
-            applicationId 'app.metro.launcher'
+            applicationId 'app.pane.launcher'
             dimension "channel"
+            buildConfigField "boolean", "PHOTO_PICKER_ONLY", "false"
         }
 
         nightly {
             applicationId 'app.lawnchair.nightly'
             dimension "channel"
+            buildConfigField "boolean", "PHOTO_PICKER_ONLY", "false"
         }
 
         play {
-            applicationId "app.lawnchair.play"
+            applicationId "app.pane.launcher"
             dimension "channel"
             isDefault true
+            buildConfigField "boolean", "PHOTO_PICKER_ONLY", "true"
         }
 
         configureEach {
@@ -325,6 +330,17 @@ android {
             res.srcDirs = ["nightly/res"]
         }
 
+        // Play's removals sit in variant source sets: those outrank the "lawn" flavor's
+        // manifest, which declares much of what has to go (flavor manifests rank in
+        // flavorDimensions order, so a plain "play" manifest couldn't remove them).
+        lawnWithQuickstepPlayRelease {
+            manifest.srcFile "play/AndroidManifest.xml"
+        }
+
+        lawnWithQuickstepPlayDebug {
+            manifest.srcFile "play/AndroidManifest.xml"
+        }
+
         lawnWithQuickstepGithub {
             manifest.srcFile "quickstep/AndroidManifest-launcher.xml"
         }
@@ -350,7 +366,7 @@ androidComponents {
     onVariants(selector().all()) { variant ->
         def channel = variant.productFlavors.last().second
         variant.outputs.forEach { output ->
-            output.outputFileName.set("Lawnchair.${output.versionName.get()}.$channel.${variant.buildType}.apk")
+            output.outputFileName.set("Pane.$channel.${variant.buildType}.apk")
         }
 
         // Lawnchair-TODO: A better way to sync proto file to the IDE preventing missing or outdated result. Please remove if this is the best solution we have right now

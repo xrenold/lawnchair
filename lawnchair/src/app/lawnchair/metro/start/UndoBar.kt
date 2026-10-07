@@ -19,7 +19,7 @@ import app.lawnchair.metro.theme.MetroTheme
 class UndoBar(context: Context) : LinearLayout(context) {
 
     private val message = TextView(context)
-    private val hint = TextView(context)
+    private val hint = TextView(context).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular }
     private val undo = TextView(context)
     private val hide = Runnable { dismiss() }
 
@@ -35,12 +35,12 @@ class UndoBar(context: Context) : LinearLayout(context) {
         }
         message.setTextColor(Color.WHITE)
         message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-        message.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        message.typeface = app.lawnchair.metro.theme.PaneFonts.regular
         row.addView(message, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         undo.text = "UNDO"
         undo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        undo.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        undo.typeface = app.lawnchair.metro.theme.PaneFonts.semibold
         undo.setPadding(dp(12f).toInt(), dp(6f).toInt(), 0, dp(6f).toInt())
         row.addView(undo)
         addView(row)

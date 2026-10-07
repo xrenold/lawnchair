@@ -41,13 +41,13 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
     private val waveReach = dp(64f)
     private val letterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        typeface = app.lawnchair.metro.theme.PaneFonts.semibold
     }
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bubbleText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
         color = Color.WHITE
-        typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        typeface = app.lawnchair.metro.theme.PaneFonts.light
     }
 
     private var touchY = 0f

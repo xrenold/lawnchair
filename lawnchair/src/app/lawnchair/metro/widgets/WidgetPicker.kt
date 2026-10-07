@@ -56,14 +56,14 @@ object WidgetPicker {
                         LinearLayout(activity).apply {
                             orientation = LinearLayout.VERTICAL
                             setPadding(dp(14f), 0, 0, 0)
-                            addView(TextView(activity).apply {
+                            addView(TextView(activity).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
                                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                                 setTextColor(Color.WHITE)
                             })
-                            addView(TextView(activity).apply {
+                            addView(TextView(activity).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
                                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                                 setTextColor(0xA6FFFFFF.toInt())
-                                typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+                                typeface = app.lawnchair.metro.theme.PaneFonts.light
                             })
                         },
                         LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),

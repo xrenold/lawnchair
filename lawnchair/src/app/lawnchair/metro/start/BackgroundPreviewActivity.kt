@@ -95,11 +95,11 @@ class BackgroundPreviewActivity : Activity() {
         grid = TileGridView(this)
         list = ListPeekView(this).apply { windowMode = windowStyle && !prefs.metroAppListPhoto.get() }
         controls = buildControls()
-        hint = TextView(this).apply {
+        hint = TextView(this).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
             text = "Drag and pinch to position the photo"
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            typeface = app.lawnchair.metro.theme.PaneFonts.light
             gravity = Gravity.CENTER
             setPadding(dp(16f).toInt(), dp(8f).toInt(), dp(16f).toInt(), dp(8f).toInt())
             background = GradientDrawable().apply { setColor(0xB3000000.toInt()) }
@@ -275,7 +275,7 @@ class BackgroundPreviewActivity : Activity() {
             setBackgroundColor(0xE6000000.toInt())
             isClickable = true
         }
-        box.addView(segmented("tiles", listOf("solid", "8.1 window"), if (windowStyle) 1 else 0) { i ->
+        box.addView(segmented("tiles", listOf("solid", "window"), if (windowStyle) 1 else 0) { i ->
             windowStyle = i == 1
             grid.windowMode = windowStyle
             grid.tiles.forEach { (it as? TileView)?.apply { windowMode = windowStyle; invalidate() } }
@@ -315,14 +315,14 @@ class BackgroundPreviewActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(4f).toInt(), 0, dp(4f).toInt())
         }
-        row.addView(TextView(this).apply {
+        row.addView(TextView(this).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
             text = title
             setTextColor(0xB3FFFFFF.toInt())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            typeface = app.lawnchair.metro.theme.PaneFonts.light
         }, LinearLayout.LayoutParams(dp(56f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT))
         val chips = options.map { label ->
-            TextView(this).apply {
+            TextView(this).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
                 text = label
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                 gravity = Gravity.CENTER
@@ -349,7 +349,7 @@ class BackgroundPreviewActivity : Activity() {
         return row
     }
 
-    private fun actionButton(label: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply {
+    private fun actionButton(label: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
         text = label
         setTextColor(Color.WHITE)
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
@@ -634,7 +634,7 @@ class BackgroundPreviewActivity : Activity() {
                     stroke.strokeWidth = dp(1.5f)
                     canvas.drawRect(r.left + 1f, r.top + 1f, r.right - 1f, r.bottom - 1f, stroke)
                     text.textSize = sp(22f)
-                    text.typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+                    text.typeface = app.lawnchair.metro.theme.PaneFonts.light
                     canvas.drawText(row.letter.lowercaseChar().toString(), r.left + dp(7f), r.bottom - dp(6f) - text.descent(), text)
                     continue
                 }
@@ -653,7 +653,7 @@ class BackgroundPreviewActivity : Activity() {
                     canvas.drawBitmap(bmp, null, RectF(r.centerX() - iw / 2, r.centerY() - ih / 2, r.centerX() + iw / 2, r.centerY() + ih / 2), iconPaint)
                 }
                 text.textSize = sp(17f)
-                text.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                text.typeface = app.lawnchair.metro.theme.PaneFonts.regular
                 val x = r.right + dp(16f)
                 val label = TextUtils.ellipsize(row.label, text, width - x - dp(16f), TextUtils.TruncateAt.END)
                 val fm = text.fontMetrics

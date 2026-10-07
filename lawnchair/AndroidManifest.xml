@@ -94,6 +94,20 @@
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <activity
+            android:name="app.lawnchair.metro.setup.PaneSetupActivity"
+            android:enableOnBackInvokedCallback="false"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <activity
+            android:name="app.lawnchair.metro.info.PhotoPickActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Transparent" />
+
+        <activity
             android:label="@string/lawnchair_actions"
             android:icon="@mipmap/ic_launcher_home"
             android:name="app.lawnchair.gestures.ui.LawnchairShortcutActivity"

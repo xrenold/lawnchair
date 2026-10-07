@@ -1,8 +1,9 @@
-name: Metro APK
+name: Pane builds
 
-# Builds an installable debug APK of the Metro launcher on every push to the
-# metro branch (or on demand from the Actions tab). Download it from the run's
-# "Artifacts" section.
+# On every push to the metro branch (or on demand from the Actions tab):
+# - "apk": the GitHub test build, published to the rolling "pane-latest" release.
+# - "play": the Google Play bundle (.aab), kept as a run artifact. It's signed with the
+#   upload key when the PANE_UPLOAD_* secrets are set (see PLAY.md).
 
 on:
   push:
@@ -59,22 +60,89 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: metro-launcher-debug
+          name: pane-github-apk
           path: build/outputs/apk/**/*.apk
           if-no-files-found: error
 
-      # Publish to a rolling "metro-latest" pre-release so the newest APK is
+      # Publish to a rolling "pane-latest" pre-release so the newest APK is
       # always one tap away on the phone (Releases page of the repo).
-      - name: Publish to metro-latest release
+      - name: Publish to pane-latest release
         if: github.ref == 'refs/heads/metro'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           APK=$(find build/outputs/apk -name '*.apk' | head -n 1)
-          cp "$APK" Metro-latest.apk
-          gh release delete metro-latest --yes --cleanup-tag || true
-          gh release create metro-latest Metro-latest.apk \
+          cp "$APK" Pane-latest.apk
+          gh release delete pane-latest --yes --cleanup-tag || true
+          gh release create pane-latest Pane-latest.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "Metro launcher (latest build)" \
-            --notes "Debug build of ${GITHUB_SHA::7} from the metro branch. Install over the previous build; your layout is kept."
+            --title "Pane (latest build)" \
+            --notes "Test build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7}) from the metro branch. Install over the previous build; your layout is kept."
+
+  play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The upload key signs bundles for Google Play. Without the secrets the bundle is
+      # still built (to catch release-only build errors) but can't be uploaded to Play.
+      - name: Use the Play upload key
+        env:
+          KEYSTORE_B64: ${{ secrets.PANE_UPLOAD_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.PANE_UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PANE_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.PANE_UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::No upload key secrets: the Play bundle is unsigned for Play."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/upload.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+
+      - name: Build Play bundle
+        run: |
+          set -o pipefail
+          ./gradlew bundleLawnWithQuickstepPlayRelease --stacktrace 2>&1 | tee build.log
+
+      # Play rejects these; make sure the Play manifest really dropped them.
+      - name: Check Play permissions
+        run: |
+          MANIFEST=$(find build/intermediates -path '*lawnWithQuickstepPlayRelease*' -name AndroidManifest.xml -path '*merged_manifest*' | head -n 1)
+          echo "Merged manifest: $MANIFEST"
+          test -n "$MANIFEST"
+          if grep -nE 'READ_MEDIA_|MANAGE_EXTERNAL_STORAGE|REQUEST_INSTALL_PACKAGES|LawnchairAccessibilityService|SleepDeviceAdmin|bugreport.UploaderService' "$MANIFEST"; then
+            echo "::error::The Play build still declares something Play doesn't allow (listed above)."
+            exit 1
+          fi
+          grep -o 'uses-permission[^>]*name="[^"]*"' "$MANIFEST" | sed 's/.*name=//' | sort -u
+
+      - name: Report build errors
+        if: failure()
+        run: |
+          grep -E "^e: |error:|\.(kt|java):[0-9]+: error|ERROR:" build.log | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: pane-play-bundle
+          path: build/outputs/bundle/**/*.aab
+          if-no-files-found: error

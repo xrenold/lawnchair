@@ -17,39 +17,44 @@
 package app.lawnchair.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 private val base = Typography()
 
+// Pane: Selawik throughout. Large text is light, as on the Start screen; body text is regular.
+private val light = FontWeight.Light
+private val semibold = FontWeight.SemiBold
+
 val Typography = Typography(
-    displayLarge = base.displayLarge.copy(fontFamily = GoogleSansFlex.Display.Emphasized.Large),
-    displayMedium = base.displayMedium.copy(fontFamily = GoogleSansFlex.Display.Emphasized.Medium),
-    displaySmall = base.displaySmall.copy(fontFamily = GoogleSansFlex.Display.Emphasized.Large),
-    headlineLarge = base.headlineLarge.copy(fontFamily = GoogleSansFlex.Headline.Emphasized.Large),
-    headlineMedium = base.headlineMedium.copy(fontFamily = GoogleSansFlex.Headline.Emphasized.Medium),
-    headlineSmall = base.headlineSmall.copy(fontFamily = GoogleSansFlex.Headline.Emphasized.Large),
-    titleLarge = base.titleLarge.copy(fontFamily = GoogleSansFlex.Title.Emphasized.Large),
-    titleMedium = base.titleMedium.copy(fontFamily = GoogleSansFlex.Title.Emphasized.Medium),
-    titleSmall = base.titleSmall.copy(fontFamily = GoogleSansFlex.Title.Emphasized.Small),
-    bodyLarge = base.bodyLarge.copy(fontFamily = GoogleSansFlex.Body.Normal.Large, letterSpacing = 0.sp),
-    bodyMedium = base.bodyMedium.copy(fontFamily = GoogleSansFlex.Body.Normal.Medium, letterSpacing = 0.1.sp),
-    bodySmall = base.bodySmall.copy(fontFamily = GoogleSansFlex.Body.Normal.Small),
-    labelLarge = base.labelLarge.copy(fontFamily = GoogleSansFlex.Label.Normal.Large),
-    labelMedium = base.labelMedium.copy(fontFamily = GoogleSansFlex.Label.Normal.Medium),
-    labelSmall = base.labelSmall.copy(fontFamily = GoogleSansFlex.Label.Normal.Small),
-    displayLargeEmphasized = base.displayLargeEmphasized.copy(fontFamily = GoogleSansFlex.Display.Emphasized.Large),
-    displayMediumEmphasized = base.displayMediumEmphasized.copy(fontFamily = GoogleSansFlex.Display.Emphasized.Medium),
-    displaySmallEmphasized = base.displaySmallEmphasized.copy(fontFamily = GoogleSansFlex.Display.Emphasized.Large),
-    headlineLargeEmphasized = base.headlineLargeEmphasized.copy(fontFamily = GoogleSansFlex.Headline.Emphasized.Large),
-    headlineMediumEmphasized = base.headlineMediumEmphasized.copy(fontFamily = GoogleSansFlex.Headline.Emphasized.Medium),
-    headlineSmallEmphasized = base.headlineSmallEmphasized.copy(fontFamily = GoogleSansFlex.Headline.Emphasized.Large),
-    titleLargeEmphasized = base.titleLargeEmphasized.copy(fontFamily = GoogleSansFlex.Title.Emphasized.Large),
-    titleMediumEmphasized = base.titleMediumEmphasized.copy(fontFamily = GoogleSansFlex.Title.Emphasized.Medium),
-    titleSmallEmphasized = base.titleSmallEmphasized.copy(fontFamily = GoogleSansFlex.Title.Emphasized.Small),
-    bodyLargeEmphasized = base.bodyLargeEmphasized.copy(fontFamily = GoogleSansFlex.Body.Emphasized.Large),
-    bodyMediumEmphasized = base.bodyMediumEmphasized.copy(fontFamily = GoogleSansFlex.Body.Emphasized.Medium),
-    bodySmallEmphasized = base.bodySmallEmphasized.copy(fontFamily = GoogleSansFlex.Body.Emphasized.Small),
-    labelLargeEmphasized = base.labelLargeEmphasized.copy(fontFamily = GoogleSansFlex.Label.Emphasized.Large),
-    labelMediumEmphasized = base.labelMediumEmphasized.copy(fontFamily = GoogleSansFlex.Label.Emphasized.Medium),
-    labelSmallEmphasized = base.labelSmallEmphasized.copy(fontFamily = GoogleSansFlex.Label.Emphasized.Small),
+    displayLarge = base.displayLarge.copy(fontFamily = Selawik, fontWeight = light),
+    displayMedium = base.displayMedium.copy(fontFamily = Selawik, fontWeight = light),
+    displaySmall = base.displaySmall.copy(fontFamily = Selawik, fontWeight = light),
+    headlineLarge = base.headlineLarge.copy(fontFamily = Selawik, fontWeight = light),
+    headlineMedium = base.headlineMedium.copy(fontFamily = Selawik, fontWeight = light),
+    headlineSmall = base.headlineSmall.copy(fontFamily = Selawik, fontWeight = light),
+    titleLarge = base.titleLarge.copy(fontFamily = Selawik, fontWeight = light),
+    titleMedium = base.titleMedium.copy(fontFamily = Selawik),
+    titleSmall = base.titleSmall.copy(fontFamily = Selawik),
+    bodyLarge = base.bodyLarge.copy(fontFamily = Selawik, letterSpacing = 0.sp),
+    bodyMedium = base.bodyMedium.copy(fontFamily = Selawik, letterSpacing = 0.1.sp),
+    bodySmall = base.bodySmall.copy(fontFamily = Selawik),
+    labelLarge = base.labelLarge.copy(fontFamily = Selawik),
+    labelMedium = base.labelMedium.copy(fontFamily = Selawik),
+    labelSmall = base.labelSmall.copy(fontFamily = Selawik),
+    displayLargeEmphasized = base.displayLargeEmphasized.copy(fontFamily = Selawik),
+    displayMediumEmphasized = base.displayMediumEmphasized.copy(fontFamily = Selawik),
+    displaySmallEmphasized = base.displaySmallEmphasized.copy(fontFamily = Selawik),
+    headlineLargeEmphasized = base.headlineLargeEmphasized.copy(fontFamily = Selawik),
+    headlineMediumEmphasized = base.headlineMediumEmphasized.copy(fontFamily = Selawik),
+    headlineSmallEmphasized = base.headlineSmallEmphasized.copy(fontFamily = Selawik),
+    titleLargeEmphasized = base.titleLargeEmphasized.copy(fontFamily = Selawik),
+    titleMediumEmphasized = base.titleMediumEmphasized.copy(fontFamily = Selawik, fontWeight = semibold),
+    titleSmallEmphasized = base.titleSmallEmphasized.copy(fontFamily = Selawik, fontWeight = semibold),
+    bodyLargeEmphasized = base.bodyLargeEmphasized.copy(fontFamily = Selawik, fontWeight = semibold),
+    bodyMediumEmphasized = base.bodyMediumEmphasized.copy(fontFamily = Selawik, fontWeight = semibold),
+    bodySmallEmphasized = base.bodySmallEmphasized.copy(fontFamily = Selawik, fontWeight = semibold),
+    labelLargeEmphasized = base.labelLargeEmphasized.copy(fontFamily = Selawik, fontWeight = semibold),
+    labelMediumEmphasized = base.labelMediumEmphasized.copy(fontFamily = Selawik, fontWeight = semibold),
+    labelSmallEmphasized = base.labelSmallEmphasized.copy(fontFamily = Selawik, fontWeight = semibold),
 )

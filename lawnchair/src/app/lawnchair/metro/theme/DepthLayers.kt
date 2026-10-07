@@ -144,47 +144,87 @@ object DepthLayers {
             if (i + 1 >= n) FloatArray(d.size) { 1f } else FloatArray(d.size) { ((1f - cover[i + 1][it]) / 0.05f).coerceIn(0f, 1f) }
         }
 
-        val maskPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
-            color = Color.BLACK
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+        // Every layer is computed pixel by pixel (colour and transparency), at full size. Masks
+        // drawn with Canvas blend modes turned out to be ignored on some phones, leaving each
+        // layer a solid rectangle, so nothing here relies on them.
+        val imgPx = IntArray(w * h)
+        img.getPixels(imgPx, 0, w, 0, 0, w, h)
+        // Bilinear lookup from the quarter-size grid, prepared once per row and column.
+        val x0 = IntArray(w)
+        val x1 = IntArray(w)
+        val ax = FloatArray(w)
+        for (x in 0 until w) {
+            val f = ((x + 0.5f) / w * qw - 0.5f).coerceIn(0f, (qw - 1).toFloat())
+            x0[x] = f.toInt()
+            x1[x] = minOf(x0[x] + 1, qw - 1)
+            ax[x] = f - x0[x]
         }
-        val plain = Paint(Paint.FILTER_BITMAP_FLAG)
-        val full = Rect(0, 0, w, h)
+        val y0 = IntArray(h)
+        val y1 = IntArray(h)
+        val ay = FloatArray(h)
+        for (y in 0 until h) {
+            val f = ((y + 0.5f) / h * qh - 0.5f).coerceIn(0f, (qh - 1).toFloat())
+            y0[y] = f.toInt()
+            y1[y] = minOf(y0[y] + 1, qh - 1)
+            ay[y] = f - y0[y]
+        }
 
         var base: Bitmap? = null
         val layers = ArrayList<BgLayer>()
         for (i in 0 until n) {
-            // Colour: the photo where this band is, its own surroundings carried in elsewhere.
+            // Colour: the photo where this layer shows its own pixels, its own surroundings
+            // carried in (push-pull fill) where a nearer layer covers it completely.
             val fill = pushPull(px, band[i], qw, qh)
-            val fillSmall = Bitmap.createBitmap(fill, qw, qh, Bitmap.Config.ARGB_8888)
-            // Fresh bitmaps that can hold transparency. (Copies of the photo would keep the
-            // JPEG's "opaque" flag, and Android then ignores the cut-outs drawn into them.)
-            val colour = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setHasAlpha(true) }
-            Canvas(colour).drawBitmap(fillSmall, null, full, plain)
-            fillSmall.recycle()
-            val own = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setHasAlpha(true) }
-            Canvas(own).apply {
-                drawBitmap(img, null, full, plain)
-                drawBitmap(alphaMask(band[i], qw, qh), null, full, maskPaint)
-            }
-            Canvas(colour).drawBitmap(own, 0f, 0f, plain)
-            own.recycle()
-            if (i == 0) {
-                base = colour
-                continue
-            }
-            Canvas(colour).drawBitmap(alphaMask(cover[i], qw, qh), null, full, maskPaint)
-            // Keep only the part with something in it.
-            val box = bounds(cover[i], qw, qh) ?: continue
+            val bnd = band[i]
+            val cov = cover[i]
+            // Layers keep only the part with something in it.
+            val box = if (i == 0) Rect(0, 0, qw, qh) else bounds(cov, qw, qh) ?: continue
             val r = Rect(box.left * Q, box.top * Q, minOf(box.right * Q, w), minOf(box.bottom * Q, h))
             if (r.width() <= 0 || r.height() <= 0) continue
-            val cut = Bitmap.createBitmap(colour, r.left, r.top, r.width(), r.height()).apply { setHasAlpha(true) }
-            if (cut !== colour) colour.recycle()
+            val rw = r.width()
+            val out = IntArray(rw * r.height())
+            for (y in r.top until r.bottom) {
+                val ra = y0[y] * qw
+                val rb = y1[y] * qw
+                val fy = ay[y]
+                for (x in r.left until r.right) {
+                    val i00 = ra + x0[x]
+                    val i01 = ra + x1[x]
+                    val i10 = rb + x0[x]
+                    val i11 = rb + x1[x]
+                    val fx = ax[x]
+                    val w00 = (1 - fx) * (1 - fy)
+                    val w01 = fx * (1 - fy)
+                    val w10 = (1 - fx) * fy
+                    val w11 = fx * fy
+                    val b = bnd[i00] * w00 + bnd[i01] * w01 + bnd[i10] * w10 + bnd[i11] * w11
+                    val c00 = fill[i00]
+                    val c01 = fill[i01]
+                    val c10 = fill[i10]
+                    val c11 = fill[i11]
+                    val fr = Color.red(c00) * w00 + Color.red(c01) * w01 + Color.red(c10) * w10 + Color.red(c11) * w11
+                    val fg = Color.green(c00) * w00 + Color.green(c01) * w01 + Color.green(c10) * w10 + Color.green(c11) * w11
+                    val fb = Color.blue(c00) * w00 + Color.blue(c01) * w01 + Color.blue(c10) * w10 + Color.blue(c11) * w11
+                    val p = imgPx[y * w + x]
+                    val cr = (Color.red(p) * b + fr * (1 - b)).toInt().coerceIn(0, 255)
+                    val cg = (Color.green(p) * b + fg * (1 - b)).toInt().coerceIn(0, 255)
+                    val cb = (Color.blue(p) * b + fb * (1 - b)).toInt().coerceIn(0, 255)
+                    val a = if (i == 0) 255 else ((cov[i00] * w00 + cov[i01] * w01 + cov[i10] * w10 + cov[i11] * w11) * 255f + 0.5f).toInt().coerceIn(0, 255)
+                    out[(y - r.top) * rw + (x - r.left)] = (a shl 24) or (cr shl 16) or (cg shl 8) or cb
+                }
+            }
+            // Colours given unpremultiplied; Android stores them premultiplied.
+            val bmp = Bitmap.createBitmap(out, rw, r.height(), Bitmap.Config.ARGB_8888).copy(Bitmap.Config.ARGB_8888, true)
+            if (i == 0) {
+                base = bmp
+                continue
+            }
+            bmp.setHasAlpha(true)
             // A nearer layer drifts up and left of the base; where it runs into the picture's
             // bottom or right edge, continue it with a mirror image so no gap opens there.
-            val extB = if (r.bottom >= h) (h * 0.06f).toInt().coerceAtMost(cut.height) else 0
-            val extR = if (r.right >= w) (w * 0.05f).toInt().coerceAtMost(cut.width) else 0
-            val layerBmp = if (extB == 0 && extR == 0) cut else mirrorExtend(cut, extR, extB).also { cut.recycle() }
+            val extB = if (r.bottom >= h) (h * 0.06f).toInt().coerceAtMost(bmp.height) else 0
+            val extR = if (r.right >= w) (w * 0.05f).toInt().coerceAtMost(bmp.width) else 0
+            val layerBmp = if (extB == 0 && extR == 0) bmp else mirrorExtend(bmp, extR, extB).also { bmp.recycle() }
             layers += BgLayer(layerBmp, RectF(r.left.toFloat(), r.top.toFloat(), (r.right + extR).toFloat(), (r.bottom + extB).toFloat()), depthOf[i])
         }
         return LayeredImage(base ?: img.copy(Bitmap.Config.ARGB_8888, true), layers)
@@ -292,18 +332,6 @@ object DepthLayers {
     private fun smooth(e0: Float, e1: Float, x: Float): Float {
         val t = ((x - e0) / (e1 - e0)).coerceIn(0f, 1f)
         return t * t * (3 - 2 * t)
-    }
-
-    private fun alphaMask(a: FloatArray, w: Int, h: Int): Bitmap {
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
-        // Rows may be padded in memory: fill each row at its real stride.
-        val stride = bmp.rowBytes
-        val bytes = ByteArray(stride * h)
-        for (y in 0 until h) for (x in 0 until w) {
-            bytes[y * stride + x] = (a[y * w + x] * 255f + 0.5f).toInt().coerceIn(0, 255).toByte()
-        }
-        bmp.copyPixelsFromBuffer(ByteBuffer.wrap(bytes))
-        return bmp
     }
 
     /** Cells where [a] is visibly above zero, padded by two cells. */

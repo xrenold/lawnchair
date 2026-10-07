@@ -62,20 +62,29 @@ class LayeredImage(val base: Bitmap, val layers: List<BgLayer>) {
         return LayeredImage(newBase, out)
     }
 
-    /** Paints the legibility dim into every layer (transparent parts stay transparent). */
+    /**
+     * Darkens every layer by the legibility dim (transparent parts stay transparent). Done per
+     * pixel rather than with a Canvas blend mode, which some phones ignore.
+     */
     fun bakeDim(alpha: Float): LayeredImage {
         if (alpha <= 0f) return this
-        val a = (alpha * 255).toInt()
-        fun dim(b: Bitmap, atop: Boolean): Bitmap {
+        val k = (1f - alpha).coerceIn(0f, 1f)
+        fun dim(b: Bitmap): Bitmap {
             val m = if (b.isMutable) b else b.copy(Bitmap.Config.ARGB_8888, true)
-            val p = Paint().apply {
-                color = Color.argb(a, 0, 0, 0)
-                if (atop) xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
+            val w = m.width
+            val row = IntArray(w)
+            for (y in 0 until m.height) {
+                m.getPixels(row, 0, w, 0, y, w, 1)
+                for (x in 0 until w) {
+                    val c = row[x]
+                    row[x] = (c and 0xFF000000.toInt()) or
+                        (((Color.red(c) * k).toInt()) shl 16) or (((Color.green(c) * k).toInt()) shl 8) or (Color.blue(c) * k).toInt()
+                }
+                m.setPixels(row, 0, w, 0, y, w, 1)
             }
-            Canvas(m).drawPaint(p)
             return m
         }
-        return LayeredImage(dim(base, false), layers.map { BgLayer(dim(it.bitmap, true), it.rect, it.depth) })
+        return LayeredImage(dim(base), layers.map { BgLayer(dim(it.bitmap), it.rect, it.depth) })
     }
 
     companion object {

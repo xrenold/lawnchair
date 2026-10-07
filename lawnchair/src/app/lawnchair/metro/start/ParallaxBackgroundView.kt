@@ -93,7 +93,7 @@ class ParallaxBackgroundView(context: Context) : FrameLayout(context) {
         if (dimBaked) return
         dimBaked = true
         if (alpha <= 0f) return
-        stack.setImage(stack.image.bakeDim(alpha))
+        stack.replaceImage(stack.image.bakeDim(alpha))
         applyOffsets() // the new layer views start unmoved
     }
 
@@ -192,7 +192,7 @@ class ParallaxBackgroundView(context: Context) : FrameLayout(context) {
             addLayers()
         }
 
-        fun setImage(newImage: LayeredImage) {
+        fun replaceImage(newImage: LayeredImage) {
             image = newImage
             removeAllViews()
             addLayers()

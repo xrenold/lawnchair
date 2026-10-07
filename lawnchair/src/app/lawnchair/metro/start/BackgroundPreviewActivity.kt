@@ -93,7 +93,7 @@ class BackgroundPreviewActivity : Activity() {
         dim = View(this).apply { setBackgroundColor(Color.BLACK); alpha = 0f }
         startLayer = FrameLayout(this)
         grid = TileGridView(this)
-        list = ListPeekView(this)
+        list = ListPeekView(this).apply { windowMode = windowStyle && !prefs.metroAppListPhoto.get() }
         controls = buildControls()
         hint = TextView(this).apply {
             text = "Drag and pinch to position the photo"
@@ -279,7 +279,7 @@ class BackgroundPreviewActivity : Activity() {
             windowStyle = i == 1
             grid.windowMode = windowStyle
             grid.tiles.forEach { (it as? TileView)?.apply { windowMode = windowStyle; invalidate() } }
-            list.windowMode = windowStyle
+            list.windowMode = windowStyle && !prefs.metroAppListPhoto.get()
             grid.invalidate()
         })
         box.addView(segmented("dim", listOf("off", "auto", "stronger"), level.coerceIn(0, 2)) { i ->

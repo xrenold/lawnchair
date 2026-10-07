@@ -70,6 +70,13 @@ fun MetroPreferenceGroups() {
                 ),
             )
         }
+        ExpandAndShrink(visible = startEnabled.state.value && prefs.metroBackground.getAdapter().state.value == MetroTheme.BG_WINDOW) {
+            SwitchPreference(
+                adapter = prefs.metroAppListPhoto.getAdapter(),
+                label = "Background behind the app list",
+                description = "The app list sits over the background instead of black; app squares are solid",
+            )
+        }
     }
 
     ExpandAndShrink(visible = startEnabled.state.value && prefs.metroBackground.getAdapter().state.value != MetroTheme.BG_BLACK) {

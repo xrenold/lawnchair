@@ -96,12 +96,17 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private val sectionPositions = HashMap<Char, Int>()
 
     /** Black behind the status bar, and behind the search bar at the bottom. */
-    private val statusStrip = app.lawnchair.metro.start.StatusFade(launcher)
+    private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
     private val searchPanel = View(launcher).apply { setBackgroundColor(Color.BLACK) }
 
     private val background = MetroTheme.background(launcher)
-    /** WP 8.1 window mode: each app square is a window onto the same wallpaper as Start. */
-    private val windowMode = background == MetroTheme.BG_WINDOW
+    /**
+     * WP 8.1 window mode: each app square is a window onto the same wallpaper as Start, on black.
+     * With "background behind the app list" on, the list instead sits over the background (as in
+     * wallpaper mode), with solid squares.
+     */
+    private val windowMode = background == MetroTheme.BG_WINDOW &&
+        !app.lawnchair.preferences.PreferenceManager.getInstance(launcher).metroAppListPhoto.get()
     private val layoutManager = LinearLayoutManager(launcher)
     private val adapter = Adapter()
 
@@ -156,7 +161,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
         list.layoutManager = layoutManager
         list.adapter = adapter
-        list.clipToPadding = false // rows slide under the status bar's fade
+        list.clipToPadding = true // rows never slide under the status bar
         list.overScrollMode = OVER_SCROLL_NEVER
         list.isVerticalScrollBarEnabled = false
         list.itemAnimator = null
@@ -189,14 +194,11 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                 return false
             }
         })
-        // Tapping the top puts the keyboard away; otherwise touches go through to the rows.
-        statusStrip.setOnTouchListener { _, e ->
-            if (!search.hasFocus()) return@setOnTouchListener false
-            if (e.actionMasked == MotionEvent.ACTION_UP) {
+        statusStrip.setOnClickListener {
+            if (search.hasFocus()) {
                 hideKeyboard()
                 updateBack()
             }
-            true
         }
         addView(list, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
@@ -277,7 +279,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     override fun setInsets(insets: Rect) {
         systemInsets.set(insets)
         navInset = insets.bottom
-        (statusStrip.layoutParams as LayoutParams).height = app.lawnchair.metro.start.StatusFade.heightFor(insets.top)
+        (statusStrip.layoutParams as LayoutParams).height = insets.top
         statusStrip.requestLayout()
         list.setPadding(0, insets.top + dp(8f).toInt(), dp(36f).toInt(), 0)
         scrubber.topInset = insets.top + dp(8f)

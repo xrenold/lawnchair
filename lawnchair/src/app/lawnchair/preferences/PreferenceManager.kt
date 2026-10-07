@@ -84,6 +84,8 @@ class PreferenceManager @Inject constructor(
     val metroShowMoreTiles = BoolPref("pref_metroShowMoreTiles", false, recreate)
     /** "black", "wallpaper" or "window" (black with wallpaper visible through tiles). */
     val metroBackground = StringPref("pref_metroBackground", "black", recreate)
+    /** 8.1 window mode: show the background photo behind the app list instead of black. */
+    val metroAppListPhoto = BoolPref("pref_metroAppListPhoto", false, recreate)
     /** "monet" (single accent), "monet_tonal" (mixed Monet tones) or "classic". */
     val metroColorMode = StringPref("pref_metroColorMode", "monet", recreate)
     /** Name of the classic Windows Phone accent used when [metroColorMode] is "classic". */

@@ -286,8 +286,25 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     /** Width of the black frame around a lifted tile. */
     override val liftBorder: Float get() = dp(4f)
 
+    /**
+     * Landing in 8.1 window mode: 1 = the tile is darkened (lights off), 0 = normal. Fading the
+     * tile's opacity shows nothing there (the photo shows through the window either way), so
+     * the landing dims the window instead.
+     */
+    var landingShade = 0f
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+    private val shadePaint = Paint()
+
     override fun onDraw(canvas: Canvas) {
         if (showingBack && hasBackFace) drawBack(canvas) else drawFront(canvas)
+        if (landingShade > 0f) {
+            shadePaint.color = Color.argb((landingShade * 0.4f * 255).toInt(), 0, 0, 0)
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shadePaint)
+        }
         if (lifted) {
             val b = liftBorder
             liftPaint.strokeWidth = b

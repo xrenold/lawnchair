@@ -87,8 +87,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      * covers the app list when that slides in.
      */
     private val dimView = View(launcher).apply { setBackgroundColor(Color.BLACK); alpha = 0f }
-    /** Black behind the status bar, fading out below it: tiles dissolve as they scroll up. */
-    private val statusStrip = StatusFade(launcher)
+    /** Solid black behind the status bar: tiles never scroll underneath it. */
+    private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
 
     private val background = MetroTheme.background(launcher)
     private val windowMode = background == MetroTheme.BG_WINDOW
@@ -171,7 +171,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** Status bar and gesture bar insets, delivered by Launcher's DragLayer. */
     override fun setInsets(insets: Rect) {
         systemInsets.set(insets)
-        (statusStrip.layoutParams as LayoutParams).height = StatusFade.heightFor(insets.top)
+        (statusStrip.layoutParams as LayoutParams).height = insets.top
         statusStrip.requestLayout()
         grid.topPadding = insets.top
         grid.bottomInset = insets.bottom
@@ -458,7 +458,14 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 val s = 1.08f - 0.08f * p
                 v.scaleX = s
                 v.scaleY = s
-                v.alpha = p
+                val tv = v as? TileView
+                if (windowMode && tv != null) {
+                    // Window tiles: lights come on as each tile lands (opacity would show nothing).
+                    v.alpha = 1f
+                    tv.landingShade = 1f - p
+                } else {
+                    v.alpha = p
+                }
             }
             grid.invalidate()
         }

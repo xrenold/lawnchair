@@ -28,7 +28,7 @@ object GradientGen {
     private class Point(val x: Float, val y: Float, val color: Int, val reach: Float, val angle: Float = 0f)
 
     /** A random gradient of [w]×[h] pixels. Same [seed], same gradient. */
-    fun random(w: Int, h: Int, seed: Long): LayeredImage {
+    fun random(w: Int, h: Int, seed: Long): Bitmap {
         val rnd = Random(seed)
         // Yellow-greens make a sickly dark body; shift them along the wheel.
         val base = (rnd.nextFloat() * 360f).let { if (it in 55f..105f) it + 60f else it }
@@ -66,7 +66,7 @@ object GradientGen {
     }
 
     /** A gradient from the album art's colours, in the same style. */
-    fun fromArt(art: Bitmap, w: Int, h: Int): LayeredImage {
+    fun fromArt(art: Bitmap, w: Int, h: Int): Bitmap {
         val palette = Palette.from(art).maximumColorCount(16).generate()
         val darks = listOfNotNull(palette.darkMutedSwatch, palette.darkVibrantSwatch, palette.dominantSwatch, palette.mutedSwatch)
             .map { it.rgb }.distinct()
@@ -86,12 +86,7 @@ object GradientGen {
 
     private fun hsv(h: Float, s: Float, v: Float) = Color.HSVToColor(floatArrayOf(((h % 360f) + 360f) % 360f, s, v))
 
-    /**
-     * The body fields (with depth vignette and grain) as the base, and each glow as its own
-     * soft layer over it, so they can drift at their own depth. Glow layers are stored at the
-     * render size and drawn scaled up; they're soft, so nothing is lost.
-     */
-    private fun render(w: Int, h: Int, body: List<Int>, glows: List<Int>, rnd: Random): LayeredImage {
+    private fun render(w: Int, h: Int, body: List<Int>, glows: List<Int>, rnd: Random): Bitmap {
         val outW = w.coerceAtLeast(1)
         val outH = h.coerceAtLeast(1)
         val sw = (outW / SCALE).coerceAtLeast(8)
@@ -131,7 +126,6 @@ object GradientGen {
         val glowCos = glowPoints.map { cos(it.angle) }
         val glowSin = glowPoints.map { sin(it.angle) }
         val px = IntArray(sw * sh)
-        val glowPx = Array(glowPoints.size) { IntArray(sw * sh) }
         val diag = kotlin.math.sqrt(1f + aspect * aspect)
         for (yi in 0 until sh) {
             val v = yi.toFloat() / (sh - 1)
@@ -159,10 +153,7 @@ object GradientGen {
                 r /= total
                 g /= total
                 b /= total
-                // Darker towards the edges, for depth.
-                val vig = 1f - 0.45f * (((u - 0.5f) * (u - 0.5f) + (v - 0.5f) * (v - 0.5f) * 0.6f) * 2.2f).coerceIn(0f, 1f)
-                px[yi * sw + xi] = srgb(r * vig, g * vig, b * vig)
-                // Glows: light laid over the body, each in its own layer.
+                // Glows are laid over the body as light.
                 for (k in glowPoints.indices) {
                     val p = glowPoints[k]
                     val dx = wu - p.x
@@ -172,45 +163,20 @@ object GradientGen {
                     val d = (a1 * a1 + a2 * a2) / (diag * diag) / (p.reach * p.reach)
                     val a = 0.85f * exp(-d.toDouble().pow(0.8).toFloat())
                     val c = glowLin[k]
-                    val col = srgb(c[0] * vig, c[1] * vig, c[2] * vig)
-                    glowPx[k][yi * sw + xi] = (((a * 255f + 0.5f).toInt().coerceIn(0, 255)) shl 24) or (col and 0xFFFFFF)
+                    r = r * (1f - a) + c[0] * a
+                    g = g * (1f - a) + c[1] * a
+                    b = b * (1f - a) + c[2] * a
                 }
+                // Darker towards the edges, for depth.
+                val vig = 1f - 0.45f * (((u - 0.5f) * (u - 0.5f) + (v - 0.5f) * (v - 0.5f) * 0.6f) * 2.2f).coerceIn(0f, 1f)
+                px[yi * sw + xi] = srgb(r * vig, g * vig, b * vig)
             }
         }
         val small = Bitmap.createBitmap(px, sw, sh, Bitmap.Config.ARGB_8888)
         val bmp = Bitmap.createScaledBitmap(small, outW, outH, true).copy(Bitmap.Config.ARGB_8888, true)
         small.recycle()
         addGrain(bmp, rnd)
-        val kx = outW.toFloat() / sw
-        val ky = outH.toFloat() / sh
-        val layers = glowPx.mapIndexedNotNull { k, g ->
-            // Only the part with light in it, so nothing transparent is drawn while scrolling.
-            var l = sw
-            var t = sh
-            var r = -1
-            var b = -1
-            for (y in 0 until sh) for (x in 0 until sw) {
-                if ((g[y * sw + x] ushr 24) > 2) {
-                    if (x < l) l = x
-                    if (x > r) r = x
-                    if (y < t) t = y
-                    if (y > b) b = y
-                }
-            }
-            if (r < 0) return@mapIndexedNotNull null
-            l = (l - 1).coerceAtLeast(0)
-            t = (t - 1).coerceAtLeast(0)
-            r = (r + 2).coerceAtMost(sw)
-            b = (b + 2).coerceAtMost(sh)
-            val cut = IntArray((r - l) * (b - t)) { i -> g[(t + i / (r - l)) * sw + l + i % (r - l)] }
-            // The first glow sits nearest; any second one a little further back.
-            BgLayer(
-                Bitmap.createBitmap(cut, r - l, b - t, Bitmap.Config.ARGB_8888).copy(Bitmap.Config.ARGB_8888, true),
-                android.graphics.RectF(l * kx, t * ky, r * kx, b * ky),
-                if (k == 0) 1f else 0.6f,
-            )
-        }
-        return LayeredImage(bmp, layers)
+        return bmp
     }
 
     /** Colours are mixed in linear light, so blends stay clean instead of going muddy. */

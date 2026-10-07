@@ -37,8 +37,6 @@ import android.widget.TextView
 import android.widget.Toast
 import app.lawnchair.metro.data.MetroTileStore
 import app.lawnchair.metro.theme.BackgroundDim
-import app.lawnchair.metro.theme.DepthLayers
-import app.lawnchair.metro.theme.LayeredImage
 import app.lawnchair.metro.theme.MetroIcons
 import app.lawnchair.metro.theme.MetroTheme
 import app.lawnchair.preferences.PreferenceManager
@@ -79,19 +77,6 @@ class BackgroundPreviewActivity : Activity() {
     private var applying = false
     private var setWallpaper = true
     @Volatile private var wallpaperFailed = false
-    @Volatile private var depthSaved = false
-
-    // ---- Depth ----
-    private var depthOn = true
-    /** Depth of the loaded photo (worked out once, on the worker thread). */
-    @Volatile private var depthMap: DepthLayers.DepthMap? = null
-    private var depthBusy = false
-    /** Layers for showing the photo here (built on a smaller copy). */
-    private var previewLayers: LayeredImage? = null
-    /** The generated gradient with its layers, at full size. */
-    @Volatile private var gradientLayers: LayeredImage? = null
-    private lateinit var scroll: android.widget.ScrollView
-    private var scrollMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,7 +86,6 @@ class BackgroundPreviewActivity : Activity() {
         window.navigationBarColor = Color.TRANSPARENT
         windowStyle = MetroTheme.background(this) == MetroTheme.BG_WINDOW
         level = prefs.metroLegibility.get()
-        depthOn = prefs.metroBackgroundDepth.get()
 
         root = TouchRoot(this)
         root.setBackgroundColor(Color.BLACK)
@@ -124,32 +108,13 @@ class BackgroundPreviewActivity : Activity() {
         val mp = ViewGroup.LayoutParams.MATCH_PARENT
         root.addView(photo, FrameLayout.LayoutParams(mp, mp))
         root.addView(dim, FrameLayout.LayoutParams(mp, mp))
-        // The tiles scroll (in "scroll tiles" mode), with the background drifting as on Start.
-        scroll = android.widget.ScrollView(this).apply {
-            isVerticalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            isFillViewport = true
-            addView(grid, ViewGroup.LayoutParams(mp, ViewGroup.LayoutParams.WRAP_CONTENT))
-            setOnScrollChangeListener { _, _, y, _, _ ->
-                val range = (grid.height - height).coerceAtLeast(1)
-                photo.scroll = (y.toFloat() / range).coerceIn(0f, 1f)
-            }
-        }
-        startLayer.addView(scroll, FrameLayout.LayoutParams(mp, mp))
+        startLayer.addView(grid, FrameLayout.LayoutParams(mp, mp))
         root.addView(startLayer, FrameLayout.LayoutParams(mp, mp))
         root.addView(list, FrameLayout.LayoutParams(mp, mp))
         root.addView(hint, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         root.addView(controls, FrameLayout.LayoutParams(mp, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         root.photo = photo
         root.controls = controls
-        root.toPhoto = { !scrollMode }
-        // Tiles can scroll clear of the controls at the bottom.
-        controls.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
-            if (grid.bottomInset != bottom - top) {
-                grid.bottomInset = bottom - top
-                grid.requestLayout()
-            }
-        }
         setContentView(root)
 
         root.setOnApplyWindowInsetsListener { _, insets ->
@@ -194,13 +159,10 @@ class BackgroundPreviewActivity : Activity() {
         val h = (bounds.height() * (1 + ParallaxBackgroundView.TRAVEL_Y)).toInt()
         val seed = System.nanoTime()
         worker.execute {
-            val layered = runCatching { app.lawnchair.metro.theme.GradientGen.random(w, h, seed) }.getOrNull()
-            val flat = layered?.flatten()
-            gradientLayers = layered
+            val bmp = runCatching { app.lawnchair.metro.theme.GradientGen.random(w, h, seed) }.getOrNull()
             main.post {
-                if (layered != null && flat != null) {
-                    photo.setImage(flat)
-                    photo.layered = if (depthOn) layered else null
+                if (bmp != null) {
+                    photo.setImage(bmp)
                     scheduleMeasure()
                 }
             }
@@ -254,51 +216,7 @@ class BackgroundPreviewActivity : Activity() {
                 } else {
                     photo.setImage(bmp)
                     scheduleMeasure()
-                    if (depthOn) showDepth()
                 }
-            }
-        }
-    }
-
-    // ---- Depth -----------------------------------------------------------------------------
-
-    /** Shows the photo's depth layers, working them out first if needed (a few seconds, once). */
-    private fun showDepth() {
-        if (gradientMode) {
-            photo.layered = gradientLayers
-            return
-        }
-        previewLayers?.let {
-            photo.layered = it
-            return
-        }
-        val src = photo.bitmap ?: return
-        if (depthBusy) return
-        depthBusy = true
-        hint.animate().cancel()
-        hint.text = "Preparing depth…"
-        hint.alpha = 1f
-        worker.execute {
-            val map = depthMap ?: DepthLayers.estimate(this, src)
-            depthMap = map
-            val layers = map?.let { m ->
-                runCatching {
-                    // A copy about the size of the screen is plenty for the preview.
-                    val k = (2400f / maxOf(src.width, src.height)).coerceAtMost(1f)
-                    val small = if (k < 1f) Bitmap.createScaledBitmap(src, (src.width * k).toInt(), (src.height * k).toInt(), true) else src
-                    DepthLayers.build(small, m)
-                }.getOrNull()
-            }
-            main.post {
-                depthBusy = false
-                previewLayers = layers
-                if (layers == null) {
-                    hint.text = "Depth isn't available for this photo"
-                } else {
-                    if (depthOn) photo.layered = layers
-                    hint.text = if (layers.layers.isEmpty()) "This photo is flat: no depth layers" else "Depth ready: scroll the tiles to see it"
-                }
-                hint.animate().alpha(0f).setStartDelay(2200).setDuration(400).start()
             }
         }
     }
@@ -376,14 +294,6 @@ class BackgroundPreviewActivity : Activity() {
         box.addView(segmented("view", listOf("start", "app list"), 0) { i ->
             showList = i == 1
             animatePan(if (showList) 1f else 0f)
-        })
-        box.addView(segmented("depth", listOf("off", "on"), if (depthOn) 1 else 0) { i ->
-            depthOn = i == 1
-            if (depthOn) showDepth() else photo.layered = null
-        })
-        box.addView(segmented("touch", listOf("move photo", "scroll tiles"), 0) { i ->
-            scrollMode = i == 1
-            if (!scrollMode) scroll.smoothScrollTo(0, 0)
         })
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -471,25 +381,7 @@ class BackgroundPreviewActivity : Activity() {
                 } else {
                     crop
                 }
-                // Old layers go first, so a failure below can never leave them with the new photo.
-                LayeredImage.clear(this)
                 ParallaxBackgroundView.file(this).outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, if (gradientMode) 96 else 92, it) }
-                // Depth layers for exactly the saved part, at the saved size. If this fails the
-                // background is simply saved without depth.
-                depthSaved = false
-                if (depthOn) runCatching {
-                    val layered = if (gradientMode) {
-                        gradientLayers?.crop(r, scale)
-                    } else {
-                        depthMap?.let { m ->
-                            DepthLayers.build(out, m, RectF(r.left / src.width, r.top / src.height, r.right / src.width, r.bottom / src.height))
-                        }
-                    }
-                    if (layered != null && layered.layers.isNotEmpty()) {
-                        LayeredImage.save(this, layered)
-                        depthSaved = true
-                    }
-                }.onFailure { LayeredImage.clear(this) }
                 // The wallpaper is a bonus: if Android refuses it, the background still applies.
                 if (setWallpaper) wallpaperFailed = runCatching { setHomeWallpaper(crop) }.isFailure
             }.isSuccess
@@ -501,8 +393,6 @@ class BackgroundPreviewActivity : Activity() {
                 }
                 if (wallpaperFailed) Toast.makeText(this, "Couldn't set the phone wallpaper", Toast.LENGTH_SHORT).show()
                 prefs.metroBackgroundKind.set(if (gradientMode) "gradient" else "photo")
-                prefs.metroBackgroundDepth.set(depthOn)
-                if (depthOn && !depthSaved && !gradientMode) Toast.makeText(this, "Saved without depth", Toast.LENGTH_SHORT).show()
                 prefs.metroLegibility.set(level)
                 prefs.metroBackground.set(if (windowStyle) MetroTheme.BG_WINDOW else MetroTheme.BG_WALLPAPER)
                 prefs.metroBackgroundPhoto.set(prefs.metroBackgroundPhoto.get() + 1)
@@ -547,16 +437,14 @@ class BackgroundPreviewActivity : Activity() {
     private class TouchRoot(context: Context) : FrameLayout(context) {
         var photo: PhotoView? = null
         var controls: View? = null
-        /** False while the tiles scroll instead (touches then go to them). */
-        var toPhoto: () -> Boolean = { true }
-        private var routeToPhoto = false
+        private var toPhoto = false
 
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
                 val c = controls
-                routeToPhoto = (c == null || ev.y < c.top) && toPhoto()
+                toPhoto = c == null || ev.y < c.top
             }
-            return if (routeToPhoto) photo?.onTouchEvent(ev) ?: false else super.dispatchTouchEvent(ev)
+            return if (toPhoto) photo?.onTouchEvent(ev) ?: false else super.dispatchTouchEvent(ev)
         }
     }
 
@@ -579,23 +467,6 @@ class BackgroundPreviewActivity : Activity() {
                 field = value
                 invalidate()
             }
-
-        /** How far the tiles have scrolled (0..1): the background drifts as on Start. */
-        var scroll = 0f
-            set(value) {
-                field = value
-                invalidate()
-            }
-
-        /** Depth layers to show instead of the flat photo (null = depth off). Their base may be smaller than [bitmap]. */
-        var layered: LayeredImage? = null
-            set(value) {
-                field = value
-                invalidate()
-            }
-        private val layerPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-        private val lm = Matrix()
-        private val lr = RectF()
 
         private val regionW get() = width * (1 + ParallaxBackgroundView.TRAVEL_X)
         private val regionH get() = height * (1 + ParallaxBackgroundView.TRAVEL_Y)
@@ -688,29 +559,9 @@ class BackgroundPreviewActivity : Activity() {
 
         override fun onDraw(canvas: Canvas) {
             val bmp = bitmap ?: return
-            val shiftX = width * ParallaxBackgroundView.TRAVEL_X * pan
-            val shiftY = height * ParallaxBackgroundView.TRAVEL_Y * scroll
-            val ox = tx - shiftX
-            val oy = ty - shiftY
-            val li = layered
-            if (li == null) {
-                m.setScale(scale, scale)
-                m.postTranslate(ox, oy)
-                canvas.drawBitmap(bmp, m, paint)
-                return
-            }
-            // Layer pixels to screen: the layers' base may be a smaller copy of the photo.
-            val s = scale * bmp.width / li.base.width
-            m.setScale(s, s)
-            m.postTranslate(ox, oy)
-            canvas.drawBitmap(li.base, m, paint)
-            for (l in li.layers) {
-                val extra = l.depth * ParallaxBackgroundView.NEAR_EXTRA
-                val lx = ox - shiftX * extra
-                val ly = oy - shiftY * extra
-                lr.set(lx + l.rect.left * s, ly + l.rect.top * s, lx + l.rect.right * s, ly + l.rect.bottom * s)
-                canvas.drawBitmap(l.bitmap, null, lr, layerPaint)
-            }
+            m.setScale(scale, scale)
+            m.postTranslate(tx - width * ParallaxBackgroundView.TRAVEL_X * pan, ty)
+            canvas.drawBitmap(bmp, m, paint)
         }
     }
 

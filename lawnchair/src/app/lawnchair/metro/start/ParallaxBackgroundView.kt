@@ -3,121 +3,84 @@ package app.lawnchair.metro.start
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.BitmapShader
 import android.graphics.Canvas
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.Shader
 import android.view.View
-import android.widget.FrameLayout
-import app.lawnchair.metro.theme.BgLayer
-import app.lawnchair.metro.theme.LayeredImage
-import app.lawnchair.preferences.PreferenceManager
 import java.io.File
 import kotlin.math.abs
 
 /**
- * The Start screen's own background, for Windows Phone 8.1's parallax: the picture is a little
- * taller than the screen and drifts upwards at a fraction of the scroll speed, so the tiles look
- * like windows sliding over a scene further away.
- *
- * With depth on, the picture is split into layers (see DepthLayers and GradientGen): nearer
- * layers drift further than the base, so the scene itself has depth. Every layer is drawn once;
- * scrolling only moves them (view translations on the graphics chip), nothing is redrawn.
+ * The Start screen's own background photo, for Windows Phone 8.1's parallax: the photo is
+ * a little taller than the screen and drifts upwards at a fraction of the scroll speed, so the
+ * tiles look like windows sliding over a scene further away.
  *
  * Android doesn't let launchers read the system wallpaper image any more, so true parallax
- * needs a picture chosen in Metro's settings; it's stored privately in the app.
+ * needs a photo chosen in Metro's settings; it's stored privately in the app.
  */
-class ParallaxBackgroundView(context: Context) : FrameLayout(context) {
+class ParallaxBackgroundView(context: Context) : View(context) {
 
-    private var main: Stack? = null
+    private var bitmap: Bitmap? = null
+    private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val dst = RectF()
     private var progress = 0f
-    private var pan = 0f
+
+    /** How much taller than the screen the photo is drawn, as a fraction of the height. */
+    private val travel = TRAVEL_Y
+
+    /** How much wider than the screen, for the sideways drift when the app list slides in. */
+    private val travelX = TRAVEL_X
     private var blurRadius = 0f
 
     fun load() {
-        main?.let { removeView(it) }
-        main = null
         val file = file(context)
-        val depth = PreferenceManager.getInstance(context).metroBackgroundDepth.get() && LayeredImage.exists(context)
-        val size = (if (depth) LayeredImage.baseSize(context) else null) ?: jpgSize(file)
-        if (size == null) {
-            dimBaked = false
+        if (!file.exists()) {
+            bitmap = null
             return
         }
         val dm = resources.displayMetrics
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, opts)
         var sample = 1
-        val targetH = (dm.heightPixels * (1 + TRAVEL_Y)).toInt()
-        while (size.first / (sample * 2) >= dm.widthPixels && size.second / (sample * 2) >= targetH) sample *= 2
-        fun flat(): LayeredImage? {
-            val s = jpgSize(file) ?: return null
-            var k = 1
-            while (s.first / (k * 2) >= dm.widthPixels && s.second / (k * 2) >= targetH) k *= 2
-            return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = k; inMutable = true })
-                ?.let { LayeredImage(it, emptyList()) }
-        }
-        // Saved layers that won't load fall back to the flat picture.
-        val image = (if (depth) LayeredImage.load(context, sample) else null) ?: flat() ?: return
-        main = Stack(context, image).also { addView(it, 0, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)) }
+        val targetH = (dm.heightPixels * (1 + travel)).toInt()
+        while (opts.outWidth / (sample * 2) >= dm.widthPixels && opts.outHeight / (sample * 2) >= targetH) sample *= 2
+        bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample; inMutable = true })
         dimBaked = false
-        applyOffsets()
+        invalidate()
     }
 
-    private fun jpgSize(file: File): Pair<Int, Int>? {
-        if (!file.exists()) return null
-        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.path, o)
-        return if (o.outWidth > 0) o.outWidth to o.outHeight else null
-    }
+    val hasImage get() = bitmap != null
 
-    val hasImage get() = main != null
+    /** The loaded photo, for measuring its brightness. */
+    val image: Bitmap? get() = bitmap
 
-    /** The picture as it looks at rest (layers included), for measuring its brightness. */
-    val image: Bitmap?
-        get() {
-            val img = main?.image ?: return null
-            return if (img.layers.isEmpty()) img.base else img.flatten()
-        }
-
-    /** True once the legibility dim has been painted into the picture itself. */
+    /** True once the legibility dim has been painted into the photo itself. */
     var dimBaked = false
         private set
 
     /**
-     * Paints the dim straight into the picture (every layer), once, instead of blending a
-     * separate full-screen layer on every frame while Start scrolls.
+     * Paints the dim straight into the photo, once, instead of blending a separate full-screen
+     * layer on every frame while Start scrolls.
      */
     fun bakeDim(alpha: Float) {
-        val stack = main ?: return
+        val bmp = bitmap ?: return
         if (dimBaked) return
         dimBaked = true
         if (alpha <= 0f) return
-        stack.replaceImage(stack.image.bakeDim(alpha))
-        applyOffsets() // the new layer views start unmoved
+        val target = if (bmp.isMutable) bmp else bmp.copy(Bitmap.Config.ARGB_8888, true).also { bitmap = it }
+        Canvas(target).drawColor(android.graphics.Color.argb((alpha * 255).toInt(), 0, 0, 0))
+        invalidate()
     }
 
-    private val travelPx get() = height - height / (1 + TRAVEL_Y)
-    private val travelXPx get() = width - width / (1 + TRAVEL_X)
-
-    /** 0 at the top of Start, 1 at the bottom. Only moves views: no redraw needed. */
+    /** 0 at the top of Start, 1 at the bottom. Only moves the view: no redraw needed. */
     fun setScrollFraction(fraction: Float) {
         progress = fraction
-        translationY = -fraction * travelPx
-        applyOffsets()
+        translationY = -fraction * (height - height / (1 + travel))
     }
 
-    /** 0 on Start, 1 with the app list open: the picture drifts left as the list slides in. */
+    /** 0 on Start, 1 with the app list open: the photo drifts left as the list slides in. */
     fun setPanFraction(fraction: Float) {
-        pan = fraction
-        translationX = -fraction * travelXPx
-        applyOffsets()
-    }
-
-    private fun applyOffsets() {
-        val dy = progress * travelPx
-        val dx = pan * travelXPx
-        for (i in 0 until childCount) (getChildAt(i) as? Stack)?.offset(dx, dy)
+        translationX = -fraction * (width - width / (1 + travelX))
     }
 
     /** Frosted-glass blur behind the app list (Android 12+). */
@@ -130,129 +93,115 @@ class ParallaxBackgroundView(context: Context) : FrameLayout(context) {
         )
     }
 
-    /** Larger than the screen by [TRAVEL_Y] and [TRAVEL_X], so there is picture left to reveal. */
+    /** Larger than the screen by [travel] and [travelX], so there is photo left to reveal. */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val w = (MeasureSpec.getSize(widthMeasureSpec) * (1 + TRAVEL_X)).toInt()
-        val h = (MeasureSpec.getSize(heightMeasureSpec) * (1 + TRAVEL_Y)).toInt()
-        super.onMeasure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val h = MeasureSpec.getSize(heightMeasureSpec)
+        setMeasuredDimension((w * (1 + travelX)).toInt(), (h * (1 + travel)).toInt())
+    }
+
+    // ---- Album gradient (gradient backgrounds while music plays) ----
+
+    private var overlay: Bitmap? = null
+    private var overlayAlpha = 0f
+    private var overlayAnim: android.animation.ValueAnimator? = null
+    private val overlayPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    /**
+     * Crossfades (1s) to [bmp] drawn over the saved background, or back to the saved background
+     * when [bmp] is null. The bitmap should already carry its dim.
+     */
+    fun showOverlay(bmp: Bitmap?) {
+        overlayAnim?.cancel()
+        if (bmp != null) {
+            // From whatever shows now: draw the old overlay into the base of the fade.
+            val from = if (overlay != null && overlayAlpha > 0f) overlayAlpha else 0f
+            if (overlay != null && from > 0f) {
+                // Fade the new one in over the current overlay by swapping once it's covered.
+                previousOverlay = overlay
+                previousAlpha = from
+            }
+            overlay = bmp
+            overlayAlpha = 0f
+            animateOverlay(1f) { previousOverlay = null }
+        } else {
+            if (overlay == null) return
+            animateOverlay(0f) {
+                overlay = null
+                previousOverlay = null
+            }
+        }
+    }
+
+    private var previousOverlay: Bitmap? = null
+    private var previousAlpha = 0f
+
+    private fun animateOverlay(to: Float, end: () -> Unit) {
+        overlayAnim = android.animation.ValueAnimator.ofFloat(overlayAlpha, to).apply {
+            duration = 1000
+            addUpdateListener {
+                overlayAlpha = it.animatedValue as Float
+                invalidate()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) = end()
+            })
+            start()
+        }
+    }
+
+    private fun drawFill(canvas: Canvas, bmp: Bitmap, paint: Paint) {
+        val boxW = width.toFloat()
+        val boxH = height.toFloat()
+        val scale = maxOf(boxW / bmp.width, boxH / bmp.height)
+        val w = bmp.width * scale
+        val h = bmp.height * scale
+        dst.set((boxW - w) / 2f, (boxH - h) / 2f, (boxW - w) / 2f + w, (boxH - h) / 2f + h)
+        canvas.drawBitmap(bmp, null, dst, paint)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val ov = overlay
+        if (ov != null && overlayAlpha >= 1f && previousOverlay == null) {
+            // Fully covered: draw only the album gradient (one full-screen bitmap per frame).
+            overlayPaint.alpha = 255
+            drawFill(canvas, ov, overlayPaint)
+            return
+        }
+        drawBase(canvas)
+        previousOverlay?.let {
+            overlayPaint.alpha = (previousAlpha * 255).toInt()
+            drawFill(canvas, it, overlayPaint)
+        }
+        overlay?.let {
+            if (overlayAlpha > 0f) {
+                overlayPaint.alpha = (overlayAlpha * 255).toInt()
+                drawFill(canvas, it, overlayPaint)
+            }
+        }
+    }
+
+    private fun drawBase(canvas: Canvas) {
+        val bmp = bitmap ?: return
+        // Centre-crop into the whole (taller-than-screen) view.
+        val boxW = width.toFloat()
+        val boxH = height.toFloat()
+        val scale = maxOf(boxW / bmp.width, boxH / bmp.height)
+        val w = bmp.width * scale
+        val h = bmp.height * scale
+        dst.set((boxW - w) / 2f, (boxH - h) / 2f, (boxW - w) / 2f + w, (boxH - h) / 2f + h)
+        canvas.drawBitmap(bmp, null, dst, paint)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         setScrollFraction(progress)
-        setPanFraction(pan)
-    }
-
-    // ---- Album gradient (gradient backgrounds while music plays) ----
-
-    private var overlay: Stack? = null
-
-    /**
-     * Crossfades (1s) to [image] over the saved background, or back to the saved background
-     * when null. The image should already carry its dim.
-     */
-    fun showOverlay(image: LayeredImage?) {
-        val old = overlay
-        // Album pictures from earlier songs still fading: only the newest one needs to stay.
-        (0 until childCount).map { getChildAt(it) }.filter { it is Stack && it !== main && it !== old }.forEach {
-            it.animate().cancel()
-            removeView(it)
-        }
-        if (image == null) {
-            if (old == null) return
-            overlay = null
-            main?.visibility = View.VISIBLE
-            old.animate().alpha(0f).setDuration(1000).withEndAction { removeView(old) }.start()
-            return
-        }
-        val next = Stack(context, image).apply { alpha = 0f }
-        addView(next, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        overlay = next
-        applyOffsets()
-        next.animate().alpha(1f).setDuration(1000).withEndAction {
-            // Fully covered: the saved background and any earlier album stop drawing.
-            if (old != null) removeView(old)
-            if (overlay === next) main?.visibility = View.INVISIBLE
-        }.start()
-    }
-
-    /**
-     * One picture and its layers. The base is drawn by this view (centre-cropped to fill it);
-     * each depth layer is a child view placed over the same spot, moved further than the base
-     * while scrolling the nearer it is.
-     */
-    private class Stack(context: Context, var image: LayeredImage) : FrameLayout(context) {
-        private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-        private val dst = RectF()
-
-        init {
-            setWillNotDraw(false)
-            // Layers draw their extended edges beyond their own bounds while they drift.
-            clipChildren = false
-            addLayers()
-        }
-
-        fun replaceImage(newImage: LayeredImage) {
-            image = newImage
-            removeAllViews()
-            addLayers()
-            invalidate()
-        }
-
-        private fun addLayers() {
-            for (l in image.layers) addView(LayerView(context, this, l), LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        }
-
-        /** Base pixels to view pixels: centre-crop of the base into this view. */
-        val scale: Float get() = maxOf(width.toFloat() / image.base.width, height.toFloat() / image.base.height)
-        val originX: Float get() = (width - image.base.width * scale) / 2f
-        val originY: Float get() = (height - image.base.height * scale) / 2f
-
-        /** The base has moved by ([dx], [dy]): nearer layers move further, by up to [NEAR_EXTRA]. */
-        fun offset(dx: Float, dy: Float) {
-            for (i in 0 until childCount) {
-                val v = getChildAt(i) as? LayerView ?: continue
-                val extra = v.layer.depth * NEAR_EXTRA
-                v.translationX = -dx * extra
-                v.translationY = -dy * extra
-            }
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            val bmp = image.base
-            val s = scale
-            dst.set(originX, originY, originX + bmp.width * s, originY + bmp.height * s)
-            canvas.drawBitmap(bmp, null, dst, paint)
-        }
-
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            super.onSizeChanged(w, h, oldw, oldh)
-            for (i in 0 until childCount) getChildAt(i).invalidate()
-        }
-    }
-
-    /** A depth layer, drawn exactly over its spot in the picture. */
-    private class LayerView(context: Context, private val stack: Stack, val layer: BgLayer) : View(context) {
-        private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-        private val r = RectF()
-
-        override fun onDraw(canvas: Canvas) {
-            val s = stack.scale
-            r.set(
-                stack.originX + layer.rect.left * s, stack.originY + layer.rect.top * s,
-                stack.originX + layer.rect.right * s, stack.originY + layer.rect.bottom * s,
-            )
-            canvas.drawBitmap(layer.bitmap, null, r, paint)
-        }
     }
 
     companion object {
-        /** Extra picture height and width beyond the screen, for the vertical and sideways drift. */
+        /** Extra photo height and width beyond the screen, for the vertical and sideways drift. */
         const val TRAVEL_Y = 0.12f
         const val TRAVEL_X = 0.10f
-
-        /** The nearest layer drifts this much further than the base (0.45 = 45% more). */
-        const val NEAR_EXTRA = 0.45f
 
         @JvmStatic
         fun file(context: Context) = File(context.filesDir, "metro_start_background.jpg")

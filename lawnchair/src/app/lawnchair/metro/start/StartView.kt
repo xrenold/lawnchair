@@ -613,16 +613,14 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val w = (bg.width / 2).coerceAtLeast(64)
         val h = (bg.height / 2).coerceAtLeast(64)
         val level = prefs.metroLegibility.get()
-        val depth = prefs.metroBackgroundDepth.get()
         albumWorker.execute {
-            val image = runCatching {
-                val layered = app.lawnchair.metro.theme.GradientGen.fromArt(art, w, h)
-                // Depth off: the glows go into the picture itself.
-                val g = if (depth) layered else app.lawnchair.metro.theme.LayeredImage(layered.flatten(), emptyList())
-                val flat = if (depth) g.flatten() else g.base
-                g.bakeDim(BackgroundDim.dimFor(BackgroundDim.luminanceOf(flat), level))
+            val bmp = runCatching {
+                app.lawnchair.metro.theme.GradientGen.fromArt(art, w, h).also { g ->
+                    val dim = BackgroundDim.dimFor(BackgroundDim.luminanceOf(g), level)
+                    if (dim > 0f) android.graphics.Canvas(g).drawColor(android.graphics.Color.argb((dim * 255).toInt(), 0, 0, 0))
+                }
             }.getOrNull() ?: return@execute
-            post { if (albumKey == key) bg.showOverlay(image) }
+            post { if (albumKey == key) bg.showOverlay(bmp) }
         }
     }
 

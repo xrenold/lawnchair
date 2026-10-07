@@ -107,14 +107,8 @@ object AutoLayout {
         val brandMemo = HashMap<String, Boolean>()
         fun isBrandTile(t: MetroTile?, component: ComponentName): Boolean {
             if (t != null && t.kind != MetroTile.Kind.APP) return false
-            when (t?.colorFor(windowMode) ?: 0) {
-                MetroTile.COLOR_BRAND -> return true
-                0 -> Unit
-                else -> return false
-            }
-            return brandMemo.getOrPut(component.packageName) {
-                runCatching { MetroIcons.getBlocking(context, component).brandTile != 0 }.getOrDefault(false)
-            }
+            // Only tiles set to "Brand color" have one (nothing is coloured automatically).
+            return t?.colorFor(windowMode) == MetroTile.COLOR_BRAND
         }
         fun isBrand(a: App) = a.fixed == null && isBrandTile(a.existing, a.component)
         fun wideOk(a: App) = !(windowMode && isBrand(a))

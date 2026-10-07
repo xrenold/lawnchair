@@ -796,10 +796,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
         if (!isWidget) {
             val colors = menu.menu.addSubMenu(Menu.NONE, MENU_COLOR, 1, "Tile color")
-            colors.add(GROUP_COLOR, 0, 0, "Automatic")
+            // In 8.1 window mode the default is a window onto the background.
+            colors.add(GROUP_COLOR, 0, 0, if (windowMode) "Transparent" else "Automatic")
             colors.add(GROUP_COLOR, 1, 1, "Brand color")
-            // 8.1 window mode: a window onto the background, never given a brand colour.
-            if (windowMode) colors.add(GROUP_COLOR, 2, 2, "Transparent")
             MetroTheme.CLASSIC_ACCENTS.keys.forEachIndexed { i, name ->
                 colors.add(GROUP_COLOR, i + 3, i + 3, name.replaceFirstChar { it.uppercase() })
             }

@@ -351,7 +351,8 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     /** True when this tile is drawn as a window onto the wallpaper (no fill). */
     private val isWindow: Boolean
-        get() = windowMode && brandColor == 0 && tileColorChoice.let { it == 0 || it == MetroTile.COLOR_BRAND }
+        get() = windowMode && brandColor == 0 &&
+            tileColorChoice.let { it == 0 || it == MetroTile.COLOR_BRAND || it == MetroTile.COLOR_WINDOW }
 
     /**
      * This tile's colour choice for the current mode. 8.1 window mode keeps its own, so a colour

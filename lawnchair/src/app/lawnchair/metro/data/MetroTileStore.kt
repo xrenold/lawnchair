@@ -81,6 +81,8 @@ data class MetroTile(
         /** Sentinels for [color]; real colours always have a non-zero alpha. */
         const val COLOR_BRAND = 1
         const val COLOR_ACCENT = 2
+        /** 8.1 window mode: always a window onto the background (no automatic brand colour). */
+        const val COLOR_WINDOW = 3
 
         fun fromJson(o: JSONObject): MetroTile? {
             val cn = ComponentName.unflattenFromString(o.optString("component")) ?: return null

@@ -709,14 +709,7 @@ class BackgroundPreviewActivity : Activity() {
                 val lx = ox - shiftX * extra
                 val ly = oy - shiftY * extra
                 lr.set(lx + l.rect.left * s, ly + l.rect.top * s, lx + l.rect.right * s, ly + l.rect.bottom * s)
-                val shader = android.graphics.BitmapShader(l.bitmap, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
-                lm.setScale(lr.width() / l.bitmap.width, lr.height() / l.bitmap.height)
-                lm.postTranslate(lr.left, lr.top)
-                shader.setLocalMatrix(lm)
-                layerPaint.shader = shader
-                val margin = maxOf(width, height) * 0.12f * extra + 2f
-                canvas.drawRect(lr.left - margin, lr.top - margin, lr.right + margin, lr.bottom + margin, layerPaint)
-                layerPaint.shader = null
+                canvas.drawBitmap(l.bitmap, null, lr, layerPaint)
             }
         }
     }

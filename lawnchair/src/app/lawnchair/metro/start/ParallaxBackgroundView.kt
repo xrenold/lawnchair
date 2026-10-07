@@ -231,14 +231,9 @@ class ParallaxBackgroundView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /**
-     * A depth layer. Its edges are extended (the outermost pixels repeated) by as far as it can
-     * drift, so a layer touching the picture's edge never pulls away from it.
-     */
+    /** A depth layer, drawn exactly over its spot in the picture. */
     private class LayerView(context: Context, private val stack: Stack, val layer: BgLayer) : View(context) {
-        private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-        private val shader = BitmapShader(layer.bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-        private val m = Matrix()
+        private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
         private val r = RectF()
 
         override fun onDraw(canvas: Canvas) {
@@ -247,12 +242,7 @@ class ParallaxBackgroundView(context: Context) : FrameLayout(context) {
                 stack.originX + layer.rect.left * s, stack.originY + layer.rect.top * s,
                 stack.originX + layer.rect.right * s, stack.originY + layer.rect.bottom * s,
             )
-            m.setScale(r.width() / layer.bitmap.width, r.height() / layer.bitmap.height)
-            m.postTranslate(r.left, r.top)
-            shader.setLocalMatrix(m)
-            paint.shader = shader
-            val margin = maxOf(width, height) * maxOf(TRAVEL_X, TRAVEL_Y) * NEAR_EXTRA * layer.depth + 2f
-            canvas.drawRect(r.left - margin, r.top - margin, r.right + margin, r.bottom + margin, paint)
+            canvas.drawBitmap(layer.bitmap, null, r, paint)
         }
     }
 

@@ -145,11 +145,16 @@ object DepthLayers {
             // Colour: the photo where this band is, its own surroundings carried in elsewhere.
             val fill = pushPull(px, band[i], qw, qh)
             val fillSmall = Bitmap.createBitmap(fill, qw, qh, Bitmap.Config.ARGB_8888)
-            val scaled = Bitmap.createScaledBitmap(fillSmall, w, h, true)
-            val colour = if (scaled.isMutable) scaled else scaled.copy(Bitmap.Config.ARGB_8888, true).also { scaled.recycle() }
-            if (fillSmall !== colour) fillSmall.recycle()
-            val own = img.copy(Bitmap.Config.ARGB_8888, true)
-            Canvas(own).drawBitmap(alphaMask(band[i], qw, qh), null, full, maskPaint)
+            // Fresh bitmaps that can hold transparency. (Copies of the photo would keep the
+            // JPEG's "opaque" flag, and Android then ignores the cut-outs drawn into them.)
+            val colour = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setHasAlpha(true) }
+            Canvas(colour).drawBitmap(fillSmall, null, full, plain)
+            fillSmall.recycle()
+            val own = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setHasAlpha(true) }
+            Canvas(own).apply {
+                drawBitmap(img, null, full, plain)
+                drawBitmap(alphaMask(band[i], qw, qh), null, full, maskPaint)
+            }
             Canvas(colour).drawBitmap(own, 0f, 0f, plain)
             own.recycle()
             if (i == 0) {
@@ -161,7 +166,7 @@ object DepthLayers {
             val box = bounds(cover[i], qw, qh) ?: continue
             val r = Rect(box.left * Q, box.top * Q, minOf(box.right * Q, w), minOf(box.bottom * Q, h))
             if (r.width() <= 0 || r.height() <= 0) continue
-            val cut = Bitmap.createBitmap(colour, r.left, r.top, r.width(), r.height())
+            val cut = Bitmap.createBitmap(colour, r.left, r.top, r.width(), r.height()).apply { setHasAlpha(true) }
             if (cut !== colour) colour.recycle()
             layers += BgLayer(cut, RectF(r), ((centres[i] - centres.first()) / span).coerceIn(0f, 1f))
         }
@@ -212,8 +217,15 @@ object DepthLayers {
     }
 
     private fun alphaMask(a: FloatArray, w: Int, h: Int): Bitmap {
-        val bytes = ByteArray(a.size) { (a[it] * 255f + 0.5f).toInt().coerceIn(0, 255).toByte() }
-        return Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8).apply { copyPixelsFromBuffer(ByteBuffer.wrap(bytes)) }
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
+        // Rows may be padded in memory: fill each row at its real stride.
+        val stride = bmp.rowBytes
+        val bytes = ByteArray(stride * h)
+        for (y in 0 until h) for (x in 0 until w) {
+            bytes[y * stride + x] = (a[y * w + x] * 255f + 0.5f).toInt().coerceIn(0, 255).toByte()
+        }
+        bmp.copyPixelsFromBuffer(ByteBuffer.wrap(bytes))
+        return bmp
     }
 
     /** Cells where [a] is visibly above zero, padded by two cells. */

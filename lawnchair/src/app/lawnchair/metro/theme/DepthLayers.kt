@@ -19,8 +19,9 @@ import kotlin.math.ceil
  *
  * 1. [estimate]: a small depth model (MiDaS v2.1 Small, MIT licence, half-precision weights)
  *    guesses how near each part of the photo is, on a 256×256 copy. About a third of a second.
- * 2. [build]: the depth is grouped into 2–4 bands (far to near). Each band becomes a layer;
- *    where a nearer thing covered it, the layer is filled with a soft continuation of its own
+ * 2. [build]: the photo is cut along its sharpest depth outlines (a subject against what's
+ *    behind it, a skyline), never across smooth slopes, and each cut is snapped to the photo's
+ *    own edges. Behind each cut-out the picture is filled with a soft continuation of its
  *    surroundings, so moving the nearer layer never shows a hole.
  *
  * Runs once when a photo is chosen; Start only loads the saved layers.
@@ -111,15 +112,31 @@ object DepthLayers {
         for (y in 0 until qh) for (x in 0 until qw) {
             d[y * qw + x] = depth.at(region.left + (x + 0.5f) / qw * region.width(), region.top + (y + 0.5f) / qh * region.height())
         }
-        val centres = bands(d)
-        if (centres.size < 2) return LayeredImage(img.copy(Bitmap.Config.ARGB_8888, true), emptyList())
-        val n = centres.size
-        val thresholds = FloatArray(n) { if (it == 0) 0f else (centres[it - 1] + centres[it]) / 2f }
+        val small = Bitmap.createScaledBitmap(img, qw, qh, true)
+        val px = IntArray(qw * qh)
+        small.getPixels(px, 0, qw, 0, 0, qw, qh)
+        val gray = FloatArray(px.size) { (Color.red(px[it]) * 0.299f + Color.green(px[it]) * 0.587f + Color.blue(px[it]) * 0.114f) / 255f }
 
-        // Coverage of each layer (layer i covers everything at least as near as band i).
-        val cover = Array(n) { i ->
-            if (i == 0) FloatArray(d.size) { 1f } else FloatArray(d.size) { smooth(thresholds[i] - EDGE, thresholds[i] + EDGE, d[it]) }
-        }
+        // Cut only where depth jumps (a silhouette), never across a smooth slope like the ground
+        // or the sky, which would tear as the layers move apart.
+        val dsm = boxBlur(d, qw, qh, 1)
+        val cuts = sharpestCuts(dsm, qw, qh)
+        if (cuts.isEmpty()) return LayeredImage(img.copy(Bitmap.Config.ARGB_8888, true), emptyList())
+        // Each cut's shape, snapped to the photo's own edges (the depth map is coarse), then made
+        // crisp so nothing faint is left around it.
+        val shapes = cuts.map { t ->
+            val raw = FloatArray(dsm.size) { smooth(t - 0.02f, t + 0.02f, dsm[it]) }
+            val refined = guided(gray, raw, qw, qh, 4, 1e-3f)
+            FloatArray(refined.size) { smooth(0.15f, 0.85f, refined[it]) }
+        }.filter { a -> a.count { it > 0.5f } > a.size * 0.02f }
+        if (shapes.isEmpty()) return LayeredImage(img.copy(Bitmap.Config.ARGB_8888, true), emptyList())
+        val n = shapes.size + 1
+        // Coverage, far to near: layer 0 is the whole base; a nearer layer never pokes out of a
+        // farther one's shape.
+        val cover = Array(n) { i -> if (i == 0) FloatArray(d.size) { 1f } else shapes[i - 1].copyOf() }
+        for (i in n - 2 downTo 1) for (k in cover[i].indices) cover[i][k] = maxOf(cover[i][k], cover[i + 1][k])
+        val depthOf = FloatArray(n) { i -> if (i == 0) 0f else i.toFloat() / (n - 1) }
+
         // Where each layer shows its own photo pixels: everywhere the next nearer layer isn't
         // fully opaque, so at rest the stack looks exactly like the photo (no halo at edges).
         // Only where a nearer layer completely covers it does a layer use its filled-in colour.
@@ -127,17 +144,12 @@ object DepthLayers {
             if (i + 1 >= n) FloatArray(d.size) { 1f } else FloatArray(d.size) { ((1f - cover[i + 1][it]) / 0.05f).coerceIn(0f, 1f) }
         }
 
-        val small = Bitmap.createScaledBitmap(img, qw, qh, true)
-        val px = IntArray(qw * qh)
-        small.getPixels(px, 0, qw, 0, 0, qw, qh)
-
         val maskPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
             color = Color.BLACK
             xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
         }
         val plain = Paint(Paint.FILTER_BITMAP_FLAG)
         val full = Rect(0, 0, w, h)
-        val span = (centres.last() - centres.first()).coerceAtLeast(1e-3f)
 
         var base: Bitmap? = null
         val layers = ArrayList<BgLayer>()
@@ -168,7 +180,12 @@ object DepthLayers {
             if (r.width() <= 0 || r.height() <= 0) continue
             val cut = Bitmap.createBitmap(colour, r.left, r.top, r.width(), r.height()).apply { setHasAlpha(true) }
             if (cut !== colour) colour.recycle()
-            layers += BgLayer(cut, RectF(r), ((centres[i] - centres.first()) / span).coerceIn(0f, 1f))
+            // A nearer layer drifts up and left of the base; where it runs into the picture's
+            // bottom or right edge, continue it with a mirror image so no gap opens there.
+            val extB = if (r.bottom >= h) (h * 0.06f).toInt().coerceAtMost(cut.height) else 0
+            val extR = if (r.right >= w) (w * 0.05f).toInt().coerceAtMost(cut.width) else 0
+            val layerBmp = if (extB == 0 && extR == 0) cut else mirrorExtend(cut, extR, extB).also { cut.recycle() }
+            layers += BgLayer(layerBmp, RectF(r.left.toFloat(), r.top.toFloat(), (r.right + extR).toFloat(), (r.bottom + extB).toFloat()), depthOf[i])
         }
         return LayeredImage(base ?: img.copy(Bitmap.Config.ARGB_8888, true), layers)
     }
@@ -179,36 +196,97 @@ object DepthLayers {
     private const val EDGE = 0.035f
 
     /**
-     * Groups depths into bands (k-means), far to near. Bands covering under 4% of the picture are
-     * dropped, and so are bands too close in depth to move visibly differently.
+     * Depth levels to cut at, nearest last: where the depth changes most steeply on average along
+     * the cut line (the outline of something standing in front of what's behind it). A second
+     * cut is kept only if nearly as sharp and clearly at a different depth. None when the photo
+     * has no real silhouette.
      */
-    private fun bands(d: FloatArray): FloatArray {
-        val sample = FloatArray((d.size + 3) / 4) { d[(it * 4).coerceAtMost(d.size - 1)] }
-        val sorted = sample.sortedArray()
-        val spread = sorted[(sorted.size * 0.95f).toInt().coerceAtMost(sorted.size - 1)] - sorted[(sorted.size * 0.05f).toInt()]
-        if (spread < 0.2f) return FloatArray(0)
-        val k = if (spread > 0.55f) 4 else 3
-        val c = FloatArray(k) { sorted[((it + 0.5f) / k * sorted.size).toInt().coerceAtMost(sorted.size - 1)] }
-        val count = IntArray(k)
-        repeat(12) {
-            val sum = FloatArray(k)
-            count.fill(0)
-            for (x in sample) {
-                var best = 0
-                for (j in 1 until k) if (kotlin.math.abs(x - c[j]) < kotlin.math.abs(x - c[best])) best = j
-                sum[best] += x
-                count[best]++
+    private fun sharpestCuts(dsm: FloatArray, w: Int, h: Int): List<Float> {
+        val grad = FloatArray(dsm.size)
+        val scale = minOf(w, h).toFloat()
+        for (y in 0 until h) for (x in 0 until w) {
+            val gx = (dsm[y * w + minOf(x + 1, w - 1)] - dsm[y * w + maxOf(x - 1, 0)]) / 2f
+            val gy = (dsm[minOf(y + 1, h - 1) * w + x] - dsm[maxOf(y - 1, 0) * w + x]) / 2f
+            grad[y * w + x] = kotlin.math.sqrt(gx * gx + gy * gy) * scale
+        }
+        val scores = ArrayList<Pair<Float, Float>>() // (score, level)
+        var t = 0.08f
+        while (t < 0.925f) {
+            var sum = 0f
+            var count = 0
+            for (i in dsm.indices) if (kotlin.math.abs(dsm[i] - t) < 0.015f) {
+                sum += grad[i]
+                count++
             }
-            for (j in 0 until k) if (count[j] > 0) c[j] = sum[j] / count[j]
+            if (count >= minOf(w, h) / 2) scores += (sum / count) to t
+            t += 0.01f
         }
-        val order = (0 until k).sortedBy { c[it] }
-        val out = ArrayList<Float>()
-        for (j in order) {
-            if (count[j] < sample.size * 0.04f) continue
-            if (out.isNotEmpty() && c[j] - out.last() < 0.12f) continue
-            out += c[j]
+        if (scores.isEmpty()) return emptyList()
+        scores.sortByDescending { it.first }
+        val best = scores.first()
+        if (best.first < MIN_EDGE) return emptyList()
+        val second = scores.firstOrNull { it.first >= best.first * 0.7f && kotlin.math.abs(it.second - best.second) >= 0.2f }
+        return listOfNotNull(best.second, second?.second).sorted()
+    }
+
+    /** Below this, the photo has no clear silhouette worth lifting off. */
+    private const val MIN_EDGE = 2f
+
+    /**
+     * Guided filter (He et al.): smooths [p] while following the edges of [guide], so a shape
+     * from the coarse depth map snaps to the outline actually visible in the photo.
+     */
+    private fun guided(guide: FloatArray, p: FloatArray, w: Int, h: Int, r: Int, eps: Float): FloatArray {
+        val mI = boxBlur(guide, w, h, r)
+        val mP = boxBlur(p, w, h, r)
+        val ip = boxBlur(FloatArray(p.size) { guide[it] * p[it] }, w, h, r)
+        val ii = boxBlur(FloatArray(p.size) { guide[it] * guide[it] }, w, h, r)
+        val a = FloatArray(p.size)
+        val b = FloatArray(p.size)
+        for (i in p.indices) {
+            val cov = ip[i] - mI[i] * mP[i]
+            val v = ii[i] - mI[i] * mI[i]
+            a[i] = cov / (v + eps)
+            b[i] = mP[i] - a[i] * mI[i]
         }
-        return out.toFloatArray()
+        val ma = boxBlur(a, w, h, r)
+        val mb = boxBlur(b, w, h, r)
+        return FloatArray(p.size) { (ma[it] * guide[it] + mb[it]).coerceIn(0f, 1f) }
+    }
+
+    /** [src] continued by mirror images of its own last [right] columns and [bottom] rows. */
+    private fun mirrorExtend(src: Bitmap, right: Int, bottom: Int): Bitmap {
+        val out = Bitmap.createBitmap(src.width + right, src.height + bottom, Bitmap.Config.ARGB_8888).apply { setHasAlpha(true) }
+        val c = Canvas(out)
+        val p = Paint(Paint.FILTER_BITMAP_FLAG)
+        c.drawBitmap(src, 0f, 0f, p)
+        val m = android.graphics.Matrix()
+        if (bottom > 0) {
+            // Flip about the bottom edge.
+            m.setScale(1f, -1f)
+            m.postTranslate(0f, 2f * src.height)
+            c.save()
+            c.clipRect(0, src.height, src.width, src.height + bottom)
+            c.drawBitmap(src, m, p)
+            c.restore()
+        }
+        if (right > 0) {
+            m.setScale(-1f, 1f)
+            m.postTranslate(2f * src.width, 0f)
+            c.save()
+            c.clipRect(src.width, 0, src.width + right, src.height)
+            c.drawBitmap(src, m, p)
+            c.restore()
+        }
+        if (right > 0 && bottom > 0) {
+            m.setScale(-1f, -1f)
+            m.postTranslate(2f * src.width, 2f * src.height)
+            c.save()
+            c.clipRect(src.width, src.height, src.width + right, src.height + bottom)
+            c.drawBitmap(src, m, p)
+            c.restore()
+        }
+        return out
     }
 
     private fun smooth(e0: Float, e1: Float, x: Float): Float {

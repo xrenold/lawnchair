@@ -36,7 +36,7 @@ object BrandTiles {
         fun area(v: TileView) = v.tile.size.span.coerceAtMost(grid.columns) * v.tile.size.rowSpan
 
         for (v in views) {
-            if (v.tile.color != MetroTile.COLOR_BRAND) continue
+            if (v.tile.colorFor(grid.windowMode) != MetroTile.COLOR_BRAND) continue
             val info = v.iconInfo ?: continue
             val c = if (info.brandTile != 0) info.brandTile else info.brandColor
             if (c == 0) continue
@@ -44,7 +44,7 @@ object BrandTiles {
             usedArea.merge(band(v), area(v), Int::plus)
         }
         val candidates = views
-            .filter { it.tile.color == 0 && (it.iconInfo?.brandTile ?: 0) != 0 }
+            .filter { it.tile.colorFor(grid.windowMode) == 0 && (it.iconInfo?.brandTile ?: 0) != 0 }
             .sortedWith(compareByDescending<TileView> { it.iconInfo!!.brandStrength }.thenBy { area(it) })
         for (v in candidates) {
             val band = band(v)

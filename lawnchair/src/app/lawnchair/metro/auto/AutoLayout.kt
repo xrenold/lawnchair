@@ -107,7 +107,7 @@ object AutoLayout {
         val brandMemo = HashMap<String, Boolean>()
         fun isBrandTile(t: MetroTile?, component: ComponentName): Boolean {
             if (t != null && t.kind != MetroTile.Kind.APP) return false
-            when (t?.color ?: 0) {
+            when (t?.colorFor(windowMode) ?: 0) {
                 MetroTile.COLOR_BRAND -> return true
                 0 -> Unit
                 else -> return false

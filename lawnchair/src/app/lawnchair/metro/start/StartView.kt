@@ -87,8 +87,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
      * covers the app list when that slides in.
      */
     private val dimView = View(launcher).apply { setBackgroundColor(Color.BLACK); alpha = 0f }
-    /** Solid black behind the status bar: tiles never scroll underneath it. */
-    private val statusStrip = View(launcher).apply { setBackgroundColor(Color.BLACK) }
+    /** Black behind the status bar, fading out below it: tiles dissolve as they scroll up. */
+    private val statusStrip = StatusFade(launcher)
 
     private val background = MetroTheme.background(launcher)
     private val windowMode = background == MetroTheme.BG_WINDOW
@@ -171,7 +171,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** Status bar and gesture bar insets, delivered by Launcher's DragLayer. */
     override fun setInsets(insets: Rect) {
         systemInsets.set(insets)
-        (statusStrip.layoutParams as LayoutParams).height = insets.top
+        (statusStrip.layoutParams as LayoutParams).height = StatusFade.heightFor(insets.top)
         statusStrip.requestLayout()
         grid.topPadding = insets.top
         grid.bottomInset = insets.bottom
@@ -796,7 +796,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
         if (!isWidget) {
             val colors = menu.menu.addSubMenu(Menu.NONE, MENU_COLOR, 1, "Tile color")
-            colors.add(GROUP_COLOR, 0, 0, "Automatic")
+            colors.add(GROUP_COLOR, 0, 0, if (windowMode) "Window (automatic)" else "Automatic")
             colors.add(GROUP_COLOR, 1, 1, "Brand color")
             colors.add(GROUP_COLOR, 2, 2, "Accent color")
             MetroTheme.CLASSIC_ACCENTS.keys.forEachIndexed { i, name ->
@@ -844,12 +844,14 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     store.save(tiles)
                 }
                 item.groupId == GROUP_COLOR -> {
-                    tile.color = when (item.itemId) {
+                    val picked = when (item.itemId) {
                         0 -> 0
                         1 -> MetroTile.COLOR_BRAND
                         2 -> MetroTile.COLOR_ACCENT
                         else -> MetroTheme.CLASSIC_ACCENTS.values.elementAt(item.itemId - 3)
                     }
+                    // 8.1 window mode keeps its own colour choice for each tile.
+                    if (windowMode) tile.windowColor = picked else tile.color = picked
                     commit(view)
                     scheduleBrands()
                 }

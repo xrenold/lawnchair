@@ -350,10 +350,17 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         private set
 
     /** True when this tile is drawn as a window onto the wallpaper (no fill). */
-    private val isWindow: Boolean get() = windowMode && brandColor == 0
+    private val isWindow: Boolean
+        get() = windowMode && brandColor == 0 && tileColorChoice.let { it == 0 || it == MetroTile.COLOR_BRAND }
+
+    /**
+     * This tile's colour choice for the current mode. 8.1 window mode keeps its own, so a colour
+     * picked there draws the tile solid, while picks from the other modes don't carry over.
+     */
+    private val tileColorChoice: Int get() = tile.colorFor(windowMode)
 
     private fun drawFill(canvas: Canvas): Int {
-        val base = if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tile.color)
+        val base = if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tileColorChoice)
         if (!isWindow) {
             fillPaint.color = base
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fillPaint)
@@ -806,7 +813,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     /** Glyphs take [onColor]; icon pack icons keep their colours unless they'd vanish on the tile. */
     private fun iconFilter(onColor: Int): android.graphics.ColorFilter? {
         val info = iconInfo
-        val bg = if (isWindow) null else if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tile.color)
+        val bg = if (isWindow) null else if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tileColorChoice)
         // Reused while nothing changes, instead of a new filter on every frame.
         if (filterValid && filterOn == onColor && filterBg == bg && filterIcon === info) return filterCached
         filterCached = if (info == null) {

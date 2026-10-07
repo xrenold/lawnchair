@@ -46,7 +46,14 @@ data class MetroTile(
     val widgetId: Int = 0,
     /** Label for shortcut tiles. */
     val title: String? = null,
+    /**
+     * Colour picked while in 8.1 window mode (same values as [color]; 0 = a window). Kept apart
+     * from [color], so picks made in one mode never carry over into the other.
+     */
+    var windowColor: Int = 0,
 ) {
+    /** The colour choice that applies in the current mode. */
+    fun colorFor(windowMode: Boolean): Int = if (windowMode) windowColor else color
     enum class Kind { APP, SHORTCUT, WIDGET }
 
     /** Stable key for colour picks and icon caching. */
@@ -68,6 +75,7 @@ data class MetroTile(
         .put("shortcutId", shortcutId ?: "")
         .put("widgetId", widgetId)
         .put("title", title ?: "")
+        .put("windowColor", windowColor)
 
     companion object {
         /** Sentinels for [color]; real colours always have a non-zero alpha. */
@@ -84,6 +92,7 @@ data class MetroTile(
                 o.optString("shortcutId").ifEmpty { null },
                 o.optInt("widgetId", 0),
                 o.optString("title").ifEmpty { null },
+                o.optInt("windowColor", 0),
             )
         }
     }

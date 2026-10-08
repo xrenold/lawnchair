@@ -284,7 +284,7 @@ class PaneSetupActivity : Activity() {
         art = TilesArt(this, lit = TilesArt.ALL),
         lead = "your Start is ready.",
         body = "Hold a tile to resize, move or recolour it. Swipe left for all your apps.",
-        primary = "go to Start" to { finishSetup() },
+        primary = "go to start" to { finishSetup() },
     )
 
     private fun finishSetup() {

@@ -31,16 +31,16 @@ fun MetroPreferenceGroups() {
 
     SetupPreferenceGroup(visible = startEnabled.state.value)
 
-    PreferenceGroup(heading = "Start") {
+    PreferenceGroup(heading = "start") {
         SwitchPreference(
             adapter = startEnabled,
-            label = "Pane Start screen",
+            label = "pane start screen",
             description = "Live tiles instead of the standard home screen",
         )
         ExpandAndShrink(visible = startEnabled.state.value) {
             val ctx = LocalContext.current
             ClickablePreference(
-                label = "Auto layout",
+                label = "auto layout",
                 subtitle = "Hold the arrow at the end of Start to arrange it from your usage. " +
                     if (app.lawnchair.metro.data.MetroUsage.hasUsageAccess(ctx)) "Usage access is on." else "Works better with usage access (see Setup & permissions).",
                 onClick = {
@@ -51,39 +51,39 @@ fun MetroPreferenceGroups() {
         ExpandAndShrink(visible = startEnabled.state.value) {
             SwitchPreference(
                 adapter = prefs.metroLayoutLocked.getAdapter(),
-                label = "Lock Start layout",
+                label = "lock start layout",
                 description = "No moving, resizing, unpinning, pinning or auto layout. Tile settings still work.",
             )
         }
         ExpandAndShrink(visible = startEnabled.state.value) {
             SwitchPreference(
                 adapter = prefs.metroShowMoreTiles.getAdapter(),
-                label = "Show more tiles",
+                label = "show more tiles",
                 description = "6 columns of small tiles instead of 4",
             )
         }
         ExpandAndShrink(visible = startEnabled.state.value) {
             ListPreference(
                 adapter = prefs.metroBackground.getAdapter(),
-                label = "Background",
+                label = "background",
                 entries = listOf(
-                    ListPreferenceEntry(MetroTheme.BG_BLACK) { "Black" },
-                    ListPreferenceEntry(MetroTheme.BG_WALLPAPER) { "Wallpaper" },
-                    ListPreferenceEntry(MetroTheme.BG_WINDOW) { "Wallpaper through tiles" },
+                    ListPreferenceEntry(MetroTheme.BG_BLACK) { "black" },
+                    ListPreferenceEntry(MetroTheme.BG_WALLPAPER) { "wallpaper" },
+                    ListPreferenceEntry(MetroTheme.BG_WINDOW) { "wallpaper through tiles" },
                 ),
             )
         }
         ExpandAndShrink(visible = startEnabled.state.value && prefs.metroBackground.getAdapter().state.value == MetroTheme.BG_WINDOW) {
             SwitchPreference(
                 adapter = prefs.metroAppListPhoto.getAdapter(),
-                label = "Background behind the app list",
+                label = "background behind the app list",
                 description = "The app list sits over the background instead of black; app squares are solid",
             )
         }
     }
 
     ExpandAndShrink(visible = startEnabled.state.value && prefs.metroBackground.getAdapter().state.value != MetroTheme.BG_BLACK) {
-        PreferenceGroup(heading = "Background photo") {
+        PreferenceGroup(heading = "background photo") {
             val context = LocalContext.current
             val photoVersion = prefs.metroBackgroundPhoto.getAdapter()
             val hasPhoto = photoVersion.state.value > 0 && ParallaxBackgroundView.file(context).exists()
@@ -95,7 +95,7 @@ fun MetroPreferenceGroups() {
                     .onFailure { Toast.makeText(context, "Couldn't use that photo", Toast.LENGTH_SHORT).show() }
             }
             ClickablePreference(
-                label = if (hasPhoto) "Change background photo" else "Choose background photo",
+                label = if (hasPhoto) "change background photo" else "choose background photo",
                 subtitle = "Shown behind the tiles, drifting gently as you scroll. " +
                     "Android doesn't let launchers move the system wallpaper this way.",
                 onClick = {
@@ -103,14 +103,14 @@ fun MetroPreferenceGroups() {
                 },
             )
             ClickablePreference(
-                label = "Generate gradient",
+                label = "generate gradient",
                 subtitle = "A soft random colour gradient, shuffled in a preview. While music plays, Start's " +
                     "background takes the album's colours, and goes back when the music stops.",
                 onClick = { app.lawnchair.metro.start.BackgroundPreviewActivity.startGradient(context) },
             )
             ExpandAndShrink(visible = hasPhoto) {
                 ClickablePreference(
-                    label = "Use system wallpaper instead",
+                    label = "use system wallpaper instead",
                     onClick = {
                         ParallaxBackgroundView.file(context).delete()
                         photoVersion.onChange(0)
@@ -121,7 +121,7 @@ fun MetroPreferenceGroups() {
     }
 
     ExpandAndShrink(visible = startEnabled.state.value) {
-        PreferenceGroup(heading = "Tiles & colors") {
+        PreferenceGroup(heading = "tiles & colours") {
             val iconCtx = LocalContext.current
             val packs = androidx.compose.runtime.remember {
                 val pm = iconCtx.packageManager
@@ -133,13 +133,13 @@ fun MetroPreferenceGroups() {
             }
             ListPreference(
                 adapter = prefs.metroIconPack.getAdapter(),
-                label = "Icon pack",
+                label = "icon pack",
                 description = "Line packs like Arcticons suit tiles best. Apps the pack doesn't cover keep their usual icon.",
-                entries = listOf(ListPreferenceEntry("") { "None (system icons)" }) +
+                entries = listOf(ListPreferenceEntry("") { "none (system icons)" }) +
                     packs.map { (pkg, name) -> ListPreferenceEntry(pkg) { name } },
             )
             SliderPreference(
-                label = "Tile icon size",
+                label = "tile icon size",
                 adapter = prefs.metroIconSize.getAdapter(),
                 valueRange = 50..150,
                 step = 5,
@@ -147,30 +147,30 @@ fun MetroPreferenceGroups() {
             )
             ListPreference(
                 adapter = prefs.metroLegibility.getAdapter(),
-                label = "Background dim",
+                label = "background dim",
                 description = "Dims bright wallpapers and photos just enough for tiles and text to stay readable. Dark backgrounds aren't dimmed.",
                 entries = listOf(
-                    ListPreferenceEntry(0) { "Off" },
-                    ListPreferenceEntry(1) { "Auto" },
-                    ListPreferenceEntry(2) { "Auto + stronger" },
+                    ListPreferenceEntry(0) { "off" },
+                    ListPreferenceEntry(1) { "auto" },
+                    ListPreferenceEntry(2) { "auto + stronger" },
                 ),
             )
             val colorMode = prefs.metroColorMode.getAdapter()
             ListPreference(
                 adapter = colorMode,
-                label = "Tile colors",
+                label = "tile colours",
                 entries = listOf(
-                    ListPreferenceEntry(MetroTheme.MODE_MONET) { "Material You accent" },
-                    ListPreferenceEntry(MetroTheme.MODE_MONET_TONAL) { "Material You mix" },
-                    ListPreferenceEntry(MetroTheme.MODE_CLASSIC) { "Classic accents" },
+                    ListPreferenceEntry(MetroTheme.MODE_MONET) { "material you accent" },
+                    ListPreferenceEntry(MetroTheme.MODE_MONET_TONAL) { "material you mix" },
+                    ListPreferenceEntry(MetroTheme.MODE_CLASSIC) { "classic accents" },
                 ),
             )
             ExpandAndShrink(visible = colorMode.state.value == MetroTheme.MODE_CLASSIC) {
                 ListPreference(
                     adapter = prefs.metroClassicAccent.getAdapter(),
-                    label = "Accent color",
+                    label = "accent colour",
                     entries = MetroTheme.CLASSIC_ACCENTS.keys.map { name ->
-                        ListPreferenceEntry(name) { name.replaceFirstChar { it.uppercase() } }
+                        ListPreferenceEntry(name) { name }
                     },
                 )
             }
@@ -178,10 +178,10 @@ fun MetroPreferenceGroups() {
     }
 
     ExpandAndShrink(visible = startEnabled.state.value) {
-        PreferenceGroup(heading = "Info tiles") {
+        PreferenceGroup(heading = "info tiles") {
             val ctx = LocalContext.current
             ClickablePreference(
-                label = "Calendars shown",
+                label = "calendars shown",
                 subtitle = "Choose which calendars appear on the calendar tile",
                 onClick = {
                     val cals = app.lawnchair.metro.info.InfoTiles.calendars(ctx)
@@ -191,31 +191,25 @@ fun MetroPreferenceGroups() {
                         val hiddenPref = prefs.metroHiddenCalendars
                         val hidden = hiddenPref.get().split(',').mapNotNull { it.trim().toLongOrNull() }.toMutableSet()
                         val checked = BooleanArray(cals.size) { cals[it].first !in hidden }
-                        android.app.AlertDialog.Builder(ctx)
-                            .setTitle("Calendars shown")
-                            .setMultiChoiceItems(cals.map { it.second }.toTypedArray(), checked) { _, i, on ->
-                                if (on) hidden -= cals[i].first else hidden += cals[i].first
-                            }
-                            .setPositiveButton(android.R.string.ok) { _, _ ->
-                                hiddenPref.set(hidden.joinToString(","))
-                                app.lawnchair.metro.info.InfoTiles.refreshCalendar()
-                            }
-                            .setNegativeButton(android.R.string.cancel, null)
-                            .show()
+                        app.lawnchair.metro.ui.PaneDialog.chooseMany(ctx, "calendars shown", cals.map { it.second }, checked) { on ->
+                            cals.forEachIndexed { i, cal -> if (on[i]) hidden -= cal.first else hidden += cal.first }
+                            hiddenPref.set(hidden.joinToString(","))
+                            app.lawnchair.metro.info.InfoTiles.refreshCalendar()
+                        }
                     }
                 },
             )
             // Live tile apps: which app's tile carries each info tile.
             listOf(
-                app.lawnchair.metro.info.InfoKind.CALENDAR to "Calendar tile app",
-                app.lawnchair.metro.info.InfoKind.PHOTOS to "Photos tile app",
-                app.lawnchair.metro.info.InfoKind.WEATHER to "Weather tile app",
-                app.lawnchair.metro.info.InfoKind.CLOCK to "Clock tile app",
+                app.lawnchair.metro.info.InfoKind.CALENDAR to "calendar tile app",
+                app.lawnchair.metro.info.InfoKind.PHOTOS to "photos tile app",
+                app.lawnchair.metro.info.InfoKind.WEATHER to "weather tile app",
+                app.lawnchair.metro.info.InfoKind.CLOCK to "clock tile app",
             ).forEach { (kind, title) ->
                 val pref = app.lawnchair.metro.info.InfoTiles.appPref(ctx, kind)
                 val chosen = pref.getAdapter().state.value
                 val chosenLabel = if (chosen.isEmpty()) {
-                    "Automatic"
+                    "automatic"
                 } else {
                     runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(chosen, 0)).toString() }.getOrDefault(chosen)
                 }
@@ -227,12 +221,12 @@ fun MetroPreferenceGroups() {
             }
             SwitchPreference(
                 adapter = prefs.metroAllDayEvents.getAdapter(),
-                label = "Show all-day events",
+                label = "show all-day events",
                 description = "On the calendar tile and agenda",
             )
             SwitchPreference(
                 adapter = prefs.metroPhotoSlideshow.getAdapter(),
-                label = "Photo slideshow",
+                label = "photo slideshow",
                 description = if (app.lawnchair.metro.info.PhotoPicks.pickerOnly) {
                     "The Photos tile shows the photos you chose"
                 } else {
@@ -243,23 +237,19 @@ fun MetroPreferenceGroups() {
     }
 
     ExpandAndShrink(visible = startEnabled.state.value) {
-        PreferenceGroup(heading = "Troubleshooting") {
+        PreferenceGroup(heading = "troubleshooting") {
             val ctx = LocalContext.current
             ClickablePreference(
-                label = "Crash reports",
+                label = "crash reports",
                 subtitle = "Saved on this phone only. Tap to see them and share one.",
                 onClick = {
                     val reports = app.lawnchair.metro.CrashLog.reports(ctx)
                     if (reports.isEmpty()) {
                         Toast.makeText(ctx, "No crashes so far", Toast.LENGTH_SHORT).show()
                     } else {
-                        android.app.AlertDialog.Builder(ctx)
-                            .setTitle("Crash reports")
-                            .setItems(reports.map { "${it.second}\n${it.third}" }.toTypedArray()) { _, i ->
-                                app.lawnchair.metro.CrashLog.share(ctx, reports[i].first)
-                            }
-                            .setNegativeButton(android.R.string.cancel, null)
-                            .show()
+                        app.lawnchair.metro.ui.PaneDialog.choose(ctx, "crash reports", reports.map { "${it.second}\n${it.third}" }) { i ->
+                            app.lawnchair.metro.CrashLog.share(ctx, reports[i].first)
+                        }
                     }
                 },
             )
@@ -267,31 +257,31 @@ fun MetroPreferenceGroups() {
     }
 
     ExpandAndShrink(visible = startEnabled.state.value) {
-        PreferenceGroup(heading = "Live tiles") {
+        PreferenceGroup(heading = "live tiles") {
             val context = LocalContext.current
             SwitchPreference(
                 adapter = prefs.metroLiveTiles.getAdapter(),
-                label = "Live tiles",
+                label = "live tiles",
                 description = "Tiles flip to show new messages and what's playing",
             )
             SwitchPreference(
                 adapter = prefs.metroMessagePeek.getAdapter(),
-                label = "Show message text on tiles",
+                label = "show message text on tiles",
                 description = "Live tiles can show the sender and first line of new messages",
             )
         }
     }
 
     ExpandAndShrink(visible = startEnabled.state.value) {
-        PreferenceGroup(heading = "About Pane") {
+        PreferenceGroup(heading = "about pane") {
             val ctx = LocalContext.current
             ClickablePreference(
-                label = "Version",
+                label = "version",
                 subtitle = com.android.launcher3.BuildConfig.VERSION_NAME,
                 onClick = {},
             )
             ClickablePreference(
-                label = "Privacy",
+                label = "privacy",
                 subtitle = "Nothing you see in Pane leaves your phone, apart from a weather lookup for your approximate area.",
                 onClick = {
                     runCatching {
@@ -302,15 +292,11 @@ fun MetroPreferenceGroups() {
                 },
             )
             ClickablePreference(
-                label = "Credits and licences",
+                label = "credits and licences",
                 subtitle = "Pane is open source (GPL-3.0), built on Lawnchair and Android's Launcher3. Font: Selawik.",
                 onClick = {
                     val text = runCatching { ctx.assets.open("pane_licenses.txt").bufferedReader().use { it.readText() } }.getOrDefault("")
-                    android.app.AlertDialog.Builder(ctx)
-                        .setTitle("Credits and licences")
-                        .setMessage(text)
-                        .setPositiveButton(android.R.string.ok, null)
-                        .show()
+                    app.lawnchair.metro.ui.PaneDialog.message(ctx, "credits and licences", text)
                 },
             )
         }
@@ -328,16 +314,11 @@ private object MetroAppPicker {
             .distinctBy { it.componentName.packageName }
             .filter { it.componentName.packageName != context.packageName }
             .sortedWith { a, b -> collator.compare(a.label.toString(), b.label.toString()) }
-        val labels = listOf("Automatic") + apps.map { it.label.toString() }
+        val labels = listOf("automatic") + apps.map { it.label.toString() }
         val values = listOf("") + apps.map { it.componentName.packageName }
-        android.app.AlertDialog.Builder(context)
-            .setTitle(title)
-            .setSingleChoiceItems(labels.toTypedArray(), values.indexOf(current).coerceAtLeast(0)) { d, i ->
-                onPick(values[i])
-                d.dismiss()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        app.lawnchair.metro.ui.PaneDialog.choose(context, title, labels, values.indexOf(current).coerceAtLeast(0)) { i ->
+            onPick(values[i])
+        }
     }
 }
 
@@ -371,14 +352,14 @@ private fun SetupPreferenceGroup(visible: Boolean) {
         fun open(intent: Intent) = runCatching { ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         fun state(on: Boolean, offText: String) = if (on) "On" else offText
 
-        PreferenceGroup(heading = "Setup & permissions") {
+        PreferenceGroup(heading = "setup & permissions") {
             ClickablePreference(
-                label = "Home app",
+                label = "home app",
                 subtitle = if (ctx.isDefaultLauncher()) "Pane is your home app" else "Tap to make Pane your home app",
                 onClick = { open(Intent(Settings.ACTION_HOME_SETTINGS)) },
             )
             ClickablePreference(
-                label = "Notification access",
+                label = "notification access",
                 subtitle = state(
                     androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName),
                     "Off: live tiles and counts need it. On Samsung, also turn on Settings › Notifications › App icon badges.",
@@ -387,27 +368,35 @@ private fun SetupPreferenceGroup(visible: Boolean) {
             )
             val missing = infoNeeded.filter { !infoTiles.hasPermission(ctx, it) }
             ClickablePreference(
-                label = if (picker) "Calendar and weather" else "Calendar, weather and photos",
+                label = if (picker) "calendar and weather" else "calendar, weather and photos",
                 subtitle = state(missing.isEmpty(), "Some are off. Tap to allow, so those tiles come alive. Weather uses approximate location."),
                 onClick = { if (missing.isNotEmpty()) ask.launch(missing.toTypedArray()) else open(appDetails(ctx)) },
             )
             if (picker) {
                 val count = app.lawnchair.metro.info.PhotoPicks.count(ctx)
                 ClickablePreference(
-                    label = "Photos for the Photos tile",
+                    label = "photos for the photos tile",
                     subtitle = if (count == 0) "None chosen yet. Tap to choose some." else "$count chosen. Tap to choose a new set; add more from the tile's menu.",
                     onClick = { app.lawnchair.metro.info.PhotoPicks.open(ctx, replace = true) },
                 )
             }
             ClickablePreference(
-                label = "Usage access",
+                label = "usage access",
                 subtitle = state(app.lawnchair.metro.data.MetroUsage.hasUsageAccess(ctx), "Off: auto layout works better with it"),
                 onClick = { open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) },
             )
             ClickablePreference(
-                label = "Run setup again",
+                label = "run setup again",
                 subtitle = "The welcome screens from the first run",
                 onClick = { app.lawnchair.metro.setup.PaneSetupActivity.start(ctx) },
+            )
+            ClickablePreference(
+                label = "show tips again",
+                subtitle = "The one-time tips that appear at the bottom of Start",
+                onClick = {
+                    app.lawnchair.metro.start.PaneTips.reset(ctx)
+                    Toast.makeText(ctx, "Tips will show again, one a day", Toast.LENGTH_SHORT).show()
+                },
             )
         }
     }

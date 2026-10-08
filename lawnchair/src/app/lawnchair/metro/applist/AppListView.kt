@@ -42,6 +42,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.PopupMenu
+import app.lawnchair.metro.ui.showPane
 import android.widget.Toast
 import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -423,6 +424,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         visibility = VISIBLE
         list.scrollToPosition(0)
         animatePan(1f)
+        postDelayed({ if (isOpen) launcher.startView?.offerTip(app.lawnchair.metro.start.PaneTips.Tip.LETTERS) }, 700)
     }
 
     fun close(animate: Boolean) {
@@ -655,20 +657,20 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private fun showAppMenu(info: AppInfo, anchor: View) {
         val menu = PopupMenu(launcher, anchor, Gravity.START)
-        menu.menu.add(0, 1, 0, "Pin to Start")
+        menu.menu.add(0, 1, 0, "pin to start")
         // App shortcuts ("New chat", "Incognito tab"…) can be pinned as their own tiles.
         val shortcuts = info.componentName?.packageName?.let {
             app.lawnchair.metro.data.MetroShortcuts.forApp(launcher, it)
         }.orEmpty()
         if (shortcuts.isNotEmpty()) {
-            val sub = menu.menu.addSubMenu(0, 4, 1, "Pin shortcut to Start")
+            val sub = menu.menu.addSubMenu(0, 4, 1, "pin shortcut to start")
             shortcuts.forEachIndexed { i, sc ->
                 sub.add(GROUP_SHORTCUT, i, i, sc.shortLabel ?: sc.longLabel ?: sc.id)
             }
         }
-        menu.menu.add(0, 2, 2, "App info")
-        menu.menu.add(0, 3, 3, "Uninstall")
-        menu.setOnMenuItemClickListener { item ->
+        menu.menu.add(0, 2, 2, "app info")
+        menu.menu.add(0, 3, 3, "uninstall")
+        menu.showPane(anchor, Gravity.START) { item ->
             val pkg = info.componentName?.packageName
             if (item.groupId == GROUP_SHORTCUT) {
                 shortcuts.getOrNull(item.itemId)?.let {
@@ -677,11 +679,11 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                         close(animate = true)
                     }
                 }
-                return@setOnMenuItemClickListener true
+                return@showPane true
             }
             when (item.itemId) {
                 1 -> {
-                    val cn = info.componentName ?: return@setOnMenuItemClickListener true
+                    val cn = info.componentName ?: return@showPane true
                     if (MetroTileStore.get(launcher).isPinned(cn)) {
                         Toast.makeText(launcher, "Already on Start", Toast.LENGTH_SHORT).show()
                     } else {
@@ -702,7 +704,6 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             }
             true
         }
-        menu.show()
     }
 
     /** One-line notification snippet for the list, e.g. "John: See you at 5!". */

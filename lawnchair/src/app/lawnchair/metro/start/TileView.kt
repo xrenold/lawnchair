@@ -889,16 +889,28 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 ),
             )
         } else if (!tile.size.isList) {
-            headPaint.typeface = app.lawnchair.metro.theme.PaneFonts.light
-            headPaint.textSize = spK(17f, 13f)
+            // A person (picture beside the name) keeps the big light name. A plain headline
+            // (an app's own notification, like a bill reminder) is Semilight, so it outweighs
+            // the message under it; the message is a touch dimmer, as on the other faces.
             bodyPaint.typeface = app.lawnchair.metro.theme.PaneFonts.regular
             bodyPaint.textSize = spK(13f, 11f)
+            bodyPaint.color = dim
             val items = info.items.take(3).ifEmpty { listOf(LiveItem(info.title, info.text, info.image, 0L)) }
             items.map { item ->
                 val pic = item.image ?: info.image
                 val titleWidth = if (pic != null) (wInt - mediumAvatarSize() - dp(8f) * k).toInt() else wInt
+                // Each row gets its own paint copy: StaticLayout keeps the paint it was made with.
+                val titlePaint = TextPaint(headPaint).apply {
+                    if (pic != null) {
+                        typeface = app.lawnchair.metro.theme.PaneFonts.light
+                        textSize = spK(17f, 13f)
+                    } else {
+                        typeface = app.lawnchair.metro.theme.PaneFonts.semilight
+                        textSize = spK(16f, 12.5f)
+                    }
+                }
                 BackRow(
-                    item.title?.let { layout(it, headPaint, titleWidth.coerceAtLeast(1), if (pic != null) 1 else 2) },
+                    item.title?.let { layout(it, titlePaint, titleWidth.coerceAtLeast(1), if (pic != null) 1 else 3) },
                     item.text?.let { layout(it, bodyPaint, wInt, 6) },
                     pic,
                 )

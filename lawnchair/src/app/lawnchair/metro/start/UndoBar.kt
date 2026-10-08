@@ -38,7 +38,7 @@ class UndoBar(context: Context) : LinearLayout(context) {
         message.typeface = app.lawnchair.metro.theme.PaneFonts.regular
         row.addView(message, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-        undo.text = "UNDO"
+        undo.text = "undo"
         undo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
         undo.typeface = app.lawnchair.metro.theme.PaneFonts.semibold
         undo.setPadding(dp(12f).toInt(), dp(6f).toInt(), 0, dp(6f).toInt())
@@ -51,7 +51,7 @@ class UndoBar(context: Context) : LinearLayout(context) {
         addView(hint)
     }
 
-    fun show(parent: FrameLayout, message: String, hint: String?, onUndo: () -> Unit, onHint: () -> Unit, actionLabel: String = "UNDO") {
+    fun show(parent: FrameLayout, message: String, hint: String?, onUndo: () -> Unit, onHint: () -> Unit, actionLabel: String = "undo") {
         undo.text = actionLabel
         // Shown on Start or the app list: move over if it was last shown on the other.
         (this.parent as? ViewGroup)?.takeIf { it !== parent }?.removeView(this)

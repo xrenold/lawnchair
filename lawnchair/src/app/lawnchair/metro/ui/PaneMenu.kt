@@ -24,7 +24,8 @@ import app.lawnchair.metro.theme.PaneFonts
  * It shows an ordinary [Menu] (built with a PopupMenu's menu, so callers keep using
  * add/addSubMenu/setCheckable), but draws it itself instead of the phone's popup style. A
  * submenu replaces the list in place, with its title on top to go back. Checked items are in
- * the accent colour. The menu swings open from the top edge, like a page turning toward you.
+ * the accent colour. It opens below what was pressed, or above it when there isn't room, and
+ * swings open from that edge.
  */
 object PaneMenu {
 
@@ -52,11 +53,46 @@ object PaneMenu {
             setOnDismissListener { onDismiss?.invoke() }
         }
 
+        // Where the menu goes: below the anchor if it fits, else above it, else on whichever side
+        // has more room (scrolling). Re-run when a submenu changes the menu's height.
+        var shownAbove = false
+        var placedHeight = 0
+        fun place(firstTime: Boolean) {
+            val frame = android.graphics.Rect()
+            anchor.getWindowVisibleDisplayFrame(frame)
+            val loc = IntArray(2)
+            anchor.getLocationOnScreen(loc)
+            val margin = dp(context, 8f)
+            scroll.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+            val wanted = scroll.measuredHeight
+            val below = frame.bottom - (loc[1] + anchor.height) - margin
+            val above = loc[1] - frame.top - margin
+            shownAbove = wanted > below && (wanted <= above || above > below)
+            val height = minOf(wanted, if (shownAbove) above else below).coerceAtLeast(dp(context, 48f))
+            placedHeight = height
+            val y = if (shownAbove) loc[1] - height else loc[1] + anchor.height
+            val alignEnd = (Gravity.getAbsoluteGravity(gravity, anchor.layoutDirection) and Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.RIGHT
+            val x = (if (alignEnd) loc[0] + anchor.width - width else loc[0])
+                .coerceIn(frame.left + margin, (frame.right - margin - width).coerceAtLeast(frame.left + margin))
+            if (firstTime) {
+                window.height = height
+                window.showAtLocation(anchor, Gravity.NO_GRAVITY, x, y)
+            } else {
+                window.update(x, y, width, height)
+            }
+        }
+
         fun fill(current: Menu, title: CharSequence?) {
             list.removeAllViews()
             if (title != null) {
                 list.addView(row(context, "‹  ${title}", header = true).apply {
-                    setOnClickListener { fill(menu, null) }
+                    setOnClickListener {
+                        fill(menu, null)
+                        place(firstTime = false)
+                    }
                 })
             }
             for (i in 0 until current.size()) {
@@ -71,6 +107,7 @@ object PaneMenu {
                         val sub = item.subMenu
                         if (item.hasSubMenu() && sub != null) {
                             fill(sub, item.title)
+                            place(firstTime = false)
                         } else {
                             window.dismiss()
                             onPick.onMenuItemClick(item)
@@ -81,10 +118,10 @@ object PaneMenu {
         }
         fill(menu, null)
 
-        // Below the anchor when there's room, otherwise above it (PopupWindow flips for us).
-        window.showAsDropDown(anchor, 0, 0, gravity)
-        scroll.pivotY = 0f
-        scroll.rotationX = -55f
+        place(firstTime = true)
+        // Swings open from the edge next to what was pressed.
+        scroll.pivotY = if (shownAbove) placedHeight.toFloat() else 0f
+        scroll.rotationX = if (shownAbove) 55f else -55f
         scroll.alpha = 0f
         scroll.cameraDistance = 8000 * dm.density
         scroll.animate().rotationX(0f).alpha(1f).setDuration(220)

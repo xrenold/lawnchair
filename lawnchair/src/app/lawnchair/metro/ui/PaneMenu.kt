@@ -35,7 +35,14 @@ object PaneMenu {
         onPick: PopupMenu.OnMenuItemClickListener,
         gravity: Int = Gravity.START,
         onDismiss: (() -> Unit)? = null,
+        waited: Int = 0,
     ) {
+        // An anchor added just now (Start's menu adds one where you pressed) has no position
+        // until it's been laid out; reading it early puts the menu at the top of the screen.
+        if ((!anchor.isLaidOut || anchor.isLayoutRequested) && waited < 5) {
+            anchor.post { show(anchor, menu, onPick, gravity, onDismiss, waited + 1) }
+            return
+        }
         val context = anchor.context
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(context).apply {

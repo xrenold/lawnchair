@@ -31,7 +31,6 @@ import app.lawnchair.ui.preferences.destinations.IconPackPreferences
 import app.lawnchair.ui.preferences.destinations.PreferencesDashboard
 import app.lawnchair.ui.preferences.destinations.SearchPreferences
 import app.lawnchair.ui.preferences.destinations.SearchProviderPreferences
-import app.lawnchair.ui.preferences.destinations.SelectAppsForDrawerFolder
 import app.lawnchair.ui.preferences.destinations.SelectIconPreference
 import app.lawnchair.ui.preferences.destinations.ShapePreference
 import com.android.launcher3.util.ComponentKey

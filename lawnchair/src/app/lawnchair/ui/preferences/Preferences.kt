@@ -80,11 +80,10 @@ fun Preferences(
     interactor: PreferenceInteractor = viewModel<PreferenceViewModel>(),
 ) {
     val navController = rememberNavController()
-    val isExpandedScreen = windowSizeClass.widthSizeClass == WindowWidthSizeClass.Expanded &&
-        windowSizeClass.heightSizeClass in
-        setOf(WindowHeightSizeClass.Expanded, WindowHeightSizeClass.Medium)
+    // Pane's settings are one page, so they're single-pane on every screen size.
+    val isExpandedScreen = false
 
-    val defaultStartingRoute = if (isExpandedScreen) General else Root
+    val defaultStartingRoute: PreferenceRootRoute = Root
     val startingRoute = startDestination ?: defaultStartingRoute
 
     val blacklistedRoute = startingRoute::class in twoPaneBlacklist

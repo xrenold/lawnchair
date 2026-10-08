@@ -61,7 +61,6 @@ import app.lawnchair.preferences.preferenceManager
 import app.lawnchair.preferences2.firstCached
 import app.lawnchair.preferences2.preferenceManager2
 import app.lawnchair.ui.OverflowMenuGrouped
-import app.lawnchair.ui.preferences.components.AnnouncementPreference
 import app.lawnchair.ui.preferences.components.controls.PreferenceCategory
 import app.lawnchair.ui.preferences.components.controls.WarningPreference
 import app.lawnchair.ui.preferences.components.layout.ClickableIcon
@@ -70,7 +69,6 @@ import app.lawnchair.ui.preferences.components.layout.PreferenceGroup
 import app.lawnchair.ui.preferences.components.layout.PreferenceLayout
 import app.lawnchair.ui.preferences.components.layout.PreferenceTemplate
 import app.lawnchair.ui.preferences.components.layout.ProvideDescriptionTextStyle
-import app.lawnchair.ui.preferences.data.liveinfo.SyncLiveInformation
 import app.lawnchair.ui.preferences.navigation.About
 import app.lawnchair.ui.preferences.navigation.AppDrawer
 import app.lawnchair.ui.preferences.navigation.BackupAndRestore
@@ -100,151 +98,25 @@ fun PreferencesDashboard(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    // Pane: Lawnchair's announcements (fetched from lawnchair.app) aren't shown or fetched.
-    val prefs = preferenceManager()
-    val prefs2 = preferenceManager2()
-
-    val aboutDescrption = if (prefs.hideVersionInfo.get()) {
-        prefs.pseudonymVersion.get()
-    } else {
-        "${context.getString(R.string.derived_app_name)} ${BuildConfig.MAJOR_VERSION}"
-    }
-
     PreferenceLayout(
-        label = if (prefs.metroTiles.get()) "pane settings" else stringResource(id = R.string.settings),
+        label = "pane settings",
         modifier = modifier,
         verticalArrangement = Arrangement.Top,
         backArrowVisible = false,
         actions = { PreferencesOverflowMenu(currentRoute = currentRoute, onNavigate = onNavigate) },
     ) {
-        if (BuildConfig.APPLICATION_ID.contains("nightly")) {
-            PreferencesDebugWarning()
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
         if (!context.isDefaultLauncher()) {
             PreferencesSetDefaultLauncherWarning()
             Spacer(modifier = Modifier.height(8.dp))
         }
-
-        // Pane: Settings is Pane's own. Lawnchair's pages (workspace, dock, drawer, search,
-        // folders, gestures, its fonts and updater, its about page) don't apply to the Start
-        // screen, so they aren't listed; backup & restore stays.
-        if (prefs.metroTiles.getAdapter().state.value) {
-            MetroPreferenceGroups()
-            PreferenceGroup(heading = "more") {
-                PreferenceCategory(
-                    label = "backup & restore",
-                    description = "Save your Start layout and settings to a file, or restore one",
-                    iconResource = R.drawable.backup_restore,
-                    onNavigate = { onNavigate(BackupAndRestore) },
-                    isSelected = currentRoute is BackupAndRestore,
-                )
-            }
-            return@PreferenceLayout
-        }
-
-        val deckLayout = prefs2.deckLayout.getAdapter()
-        PreferenceGroup {
+        MetroPreferenceGroups()
+        PreferenceGroup(heading = "more") {
             PreferenceCategory(
-                label = stringResource(R.string.general_label),
-                description = stringResource(R.string.general_description),
-                iconResource = R.drawable.ic_general,
-                onNavigate = { onNavigate(General) },
-                isSelected = currentRoute is General,
-            )
-
-            PreferenceCategory(
-                label = stringResource(R.string.home_screen_label),
-                description = stringResource(R.string.home_screen_description),
-                iconResource = R.drawable.ic_home_screen,
-                onNavigate = { onNavigate(HomeScreen) },
-                isSelected = currentRoute is HomeScreen,
-            )
-
-            // With Metro Start on, the workspace, dock, drawer, search bar, folders and gesture
-            // settings don't apply, so they're hidden (Metro has its own section under Home screen).
-            if (!prefs.metroTiles.getAdapter().state.value) {
-            val isSmartspaceEnabled = prefs2.enableSmartspace.firstCached()
-            PreferenceCategory(
-                label = stringResource(id = R.string.smartspace_widget),
-                description = stringResource(R.string.smartspace_widget_description),
-                iconResource = if (isSmartspaceEnabled) R.drawable.ic_smartspace else R.drawable.ic_smartspace_off,
-                onNavigate = { onNavigate(Smartspace) },
-                isSelected = currentRoute is Smartspace,
-            )
-
-            PreferenceCategory(
-                label = stringResource(R.string.dock_label),
-                description = stringResource(R.string.dock_description),
-                iconResource = R.drawable.ic_dock,
-                onNavigate = { onNavigate(Dock) },
-                isSelected = currentRoute is Dock,
-            )
-
-            ExpandAndShrink(
-                visible = !deckLayout.state.value,
-            ) {
-                PreferenceCategory(
-                    label = stringResource(R.string.app_drawer_label),
-                    description = stringResource(R.string.app_drawer_description),
-                    iconResource = R.drawable.ic_apps,
-                    onNavigate = { onNavigate(AppDrawer) },
-                    isSelected = currentRoute is AppDrawer,
-                )
-            }
-
-            PreferenceCategory(
-                label = stringResource(R.string.search_bar_label),
-                description = stringResource(R.string.drawer_search_description),
-                iconResource = R.drawable.ic_search,
-                onNavigate = { onNavigate(Search()) },
-                isSelected = currentRoute is Search,
-            )
-
-            PreferenceCategory(
-                label = stringResource(R.string.folders_label),
-                description = stringResource(R.string.folders_description),
-                iconResource = R.drawable.ic_folder,
-                onNavigate = { onNavigate(Folders) },
-                isSelected = currentRoute is Folders,
-            )
-
-            PreferenceCategory(
-                label = stringResource(id = R.string.gestures_label),
-                description = stringResource(R.string.gestures_description),
-                iconResource = R.drawable.ic_gestures,
-                onNavigate = { onNavigate(Gestures) },
-                isSelected = currentRoute is Gestures,
-            )
-            }
-
-            ExpandAndShrink(
-                visible = LawnchairApp.isRecentsEnabled || BuildConfig.DEBUG,
-            ) {
-                PreferenceCategory(
-                    label = stringResource(id = R.string.quickstep_label),
-                    description = stringResource(id = R.string.quickstep_description),
-                    iconResource = R.drawable.ic_quickstep,
-                    onNavigate = { onNavigate(Quickstep) },
-                    isSelected = currentRoute is Quickstep,
-                )
-            }
-
-            PreferenceCategory(
-                label = stringResource(R.string.backup_and_restore_label),
-                description = stringResource(R.string.backup_and_restore_description),
+                label = "backup & restore",
+                description = "Save your Start layout and settings to a file, or restore one",
                 iconResource = R.drawable.backup_restore,
                 onNavigate = { onNavigate(BackupAndRestore) },
                 isSelected = currentRoute is BackupAndRestore,
-            )
-
-            PreferenceCategory(
-                label = stringResource(R.string.about_label),
-                description = aboutDescrption,
-                iconResource = R.drawable.ic_about,
-                onNavigate = { onNavigate(About) },
-                isSelected = currentRoute is About,
             )
         }
     }
@@ -256,28 +128,14 @@ fun RowScope.PreferencesOverflowMenu(
     onNavigate: (PreferenceRootRoute) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val enableDebug by preferenceManager().enableDebugMenu.observeAsState()
     val highlightColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp)
     val highlightShape = MaterialTheme.shapes.large
 
-    if (enableDebug) {
-        ClickableIcon(
-            imageVector = Icons.Rounded.Build,
-            onClick = { onNavigate(DebugMenu) },
-            modifier = Modifier.addIf(currentRoute == DebugMenu) {
-                Modifier
-                    .clip(highlightShape)
-                    .background(highlightColor)
-            },
-        )
-    }
     val context = LocalContext.current
 
     OverflowMenuGrouped(
         modifier = modifier.addIf(
-            listOf(ExperimentalFeatures).any {
-                currentRoute == it
-            },
+            false,
         ) {
             Modifier
                 .clip(highlightShape)
@@ -317,22 +175,6 @@ fun RowScope.PreferencesOverflowMenu(
                 },
                 text = {
                     Text(text = stringResource(id = R.string.debug_restart_launcher))
-                },
-            )
-            DropdownMenuItem(
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.Science,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                onClick = {
-                    onNavigate(ExperimentalFeatures)
-                    hideMenu()
-                },
-                text = {
-                    Text(text = stringResource(id = R.string.experimental_features_label))
                 },
             )
         }

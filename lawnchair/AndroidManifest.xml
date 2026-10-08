@@ -21,27 +21,11 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="com.google.android.apps.nexuslauncher.permission.QSB" />
-    <uses-permission android:name="com.kieronquinn.app.smartspacer.permission.ACCESS_SMARTSPACER"/>
-    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <!-- Metro live tiles: calendar agenda and weather for your area. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission android:name="android.permission.READ_HISTORY_BOOKMARKS" />
-    <uses-permission android:name="android.permission.WRITE_HISTORY_BOOKMARKS" />
-    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS" tools:ignore="ProtectedPermissions"/>
-    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL" tools:ignore="ProtectedPermissions"/>
-    <uses-permission android:name="android.permission.MANAGE_USERS" tools:ignore="ProtectedPermissions"/>
-    <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES" tools:ignore="ProtectedPermissions"/>
-    <uses-permission android:name="android.permission.STATUS_BAR_SERVICE" tools:ignore="ProtectedPermissions"/>
-    <uses-permission android:name="android.permission.SUSPEND_APPS" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.FLASHLIGHT" />
 
     <!-- Support non-cellular enabled devices -->
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -108,77 +92,11 @@
             android:theme="@style/Theme.Transparent" />
 
         <activity
-            android:label="@string/lawnchair_actions"
-            android:icon="@mipmap/ic_launcher_home"
-            android:name="app.lawnchair.gestures.ui.LawnchairShortcutActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Lawnchair">
-            <intent-filter>
-                <action android:name="android.intent.action.CREATE_SHORTCUT" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
-
-        <activity
-            android:name="app.lawnchair.gestures.ui.RunHandlerActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Lawnchair">
-            <intent-filter>
-                <action android:name="app.lawnchair.START_ACTION" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
-
-
-        <activity
             android:name="com.android.launcher3.secondarydisplay.SecondaryDisplayLauncher"
             tools:node="remove" />
-
-        <activity
-            android:name="app.lawnchair.ui.ApplyIconPackActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Transparent">
-            <intent-filter>
-                <action android:name="app.lawnchair.APPLY_ICONS" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
-
         <activity
             android:name="app.lawnchair.BlankActivity"
             android:theme="@style/Theme.Transparent" />
-
-        <activity
-            android:name="app.lawnchair.smartspace.SmartspacePreferencesShortcut"
-            android:theme="@style/Theme.Transparent" />
-
-        <receiver
-            android:name="app.lawnchair.gestures.handlers.SleepMethodDeviceAdmin$SleepDeviceAdmin"
-            android:description="@string/dt2s_admin_hint"
-            android:exported="true"
-            android:label="@string/derived_app_name"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/sleep_policy" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-            </intent-filter>
-        </receiver>
-
-        <service
-            android:name="app.lawnchair.LawnchairAccessibilityService"
-            android:exported="false"
-            android:label="@string/derived_app_name"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
-
         <provider
             android:name="app.lawnchair.bugreport.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -194,35 +112,6 @@
             android:authorities="${applicationId}.search.LawnchairRecentSuggestionProvider"
             android:syncable="true"
             android:exported="false" />
-
-        <receiver
-            android:name="app.lawnchair.bugreport.BugReportReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="${applicationId}.bugreport.COPY" />
-                <action android:name="${applicationId}.bugreport.UPLOAD" />
-                <action android:name="${applicationId}.bugreport.UPLOAD_COMPLETE" />
-            </intent-filter>
-        </receiver>
-
-        <service
-            android:name="app.lawnchair.bugreport.UploaderService"
-            android:enabled="true"
-            android:exported="false"
-            android:process=":bugReport"
-            android:foregroundServiceType="dataSync" />
-
-        <receiver
-            android:name="app.lawnchair.smartspace.SmartspaceAppWidgetProvider"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/smartspace_appwidget_info" />
-        </receiver>
-
         <meta-data
             android:name="xyz.paphonb.quickstepswitcher.minSdk"
             android:value="${quickstepMinSdk}" />

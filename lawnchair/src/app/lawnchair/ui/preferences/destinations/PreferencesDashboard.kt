@@ -111,13 +111,13 @@ fun PreferencesDashboard(
     }
 
     PreferenceLayout(
-        label = stringResource(id = R.string.settings),
+        label = if (prefs.metroTiles.get()) "pane settings" else stringResource(id = R.string.settings),
         modifier = modifier,
         verticalArrangement = Arrangement.Top,
         backArrowVisible = false,
         actions = { PreferencesOverflowMenu(currentRoute = currentRoute, onNavigate = onNavigate) },
     ) {
-        if (BuildConfig.APPLICATION_ID.contains("nightly") || BuildConfig.DEBUG) {
+        if (BuildConfig.APPLICATION_ID.contains("nightly")) {
             PreferencesDebugWarning()
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -125,6 +125,23 @@ fun PreferencesDashboard(
         if (!context.isDefaultLauncher()) {
             PreferencesSetDefaultLauncherWarning()
             Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Pane: Settings is Pane's own. Lawnchair's pages (workspace, dock, drawer, search,
+        // folders, gestures, its fonts and updater, its about page) don't apply to the Start
+        // screen, so they aren't listed; backup & restore stays.
+        if (prefs.metroTiles.getAdapter().state.value) {
+            MetroPreferenceGroups()
+            PreferenceGroup(heading = "more") {
+                PreferenceCategory(
+                    label = "backup & restore",
+                    description = "Save your Start layout and settings to a file, or restore one",
+                    iconResource = R.drawable.backup_restore,
+                    onNavigate = { onNavigate(BackupAndRestore) },
+                    isSelected = currentRoute is BackupAndRestore,
+                )
+            }
+            return@PreferenceLayout
         }
 
         val deckLayout = prefs2.deckLayout.getAdapter()

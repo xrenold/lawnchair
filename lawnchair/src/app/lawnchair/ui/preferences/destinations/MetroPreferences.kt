@@ -32,11 +32,7 @@ fun MetroPreferenceGroups() {
     SetupPreferenceGroup(visible = startEnabled.state.value)
 
     PreferenceGroup(heading = "start") {
-        SwitchPreference(
-            adapter = startEnabled,
-            label = "pane start screen",
-            description = "Live tiles instead of the standard home screen",
-        )
+        // Pane is always the Start screen; Lawnchair's home screen isn't offered any more.
         ExpandAndShrink(visible = startEnabled.state.value) {
             val ctx = LocalContext.current
             ClickablePreference(

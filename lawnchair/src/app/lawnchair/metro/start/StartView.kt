@@ -970,12 +970,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                         Toast.makeText(launcher, if (locked) "Start unlocked" else "Start layout locked", Toast.LENGTH_SHORT).show()
                     }
                 }
-                3 -> launcher.startActivity(
-                    app.lawnchair.ui.preferences.PreferenceActivity.createIntent(
-                        launcher,
-                        app.lawnchair.ui.preferences.navigation.HomeScreen,
-                    ),
-                )
+                3 -> launcher.startActivity(Intent(launcher, app.lawnchair.ui.preferences.PreferenceActivity::class.java))
             }
             true
         }

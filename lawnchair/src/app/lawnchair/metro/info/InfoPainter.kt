@@ -54,22 +54,41 @@ class InfoPainter(private val context: Context) {
         return InfoTiles.events.filter { it.begin < t1 && it.end > now().coerceAtLeast(if (it.allDay) t0 else 0) }
     }
 
-    /** The next timed event (or an all-day one today), for the medium tile's content side. */
-    fun nextEvent(): CalEvent? = InfoTiles.events.firstOrNull { !it.allDay && it.end > now() } ?: todayEvents().firstOrNull()
+    /** What the tile shows: events still to come today and tomorrow's. Later days aren't shown. */
+    fun tileEvents(): List<CalEvent> {
+        val t0 = today()
+        val t2 = t0 + 2 * InfoTiles.DAY
+        return InfoTiles.events.filter { it.begin < t2 && it.end > now().coerceAtLeast(if (it.allDay) t0 else 0) }
+    }
+
+    /** The next timed event today or tomorrow (else an all-day one), for the medium tile's back. */
+    fun nextEvent(): CalEvent? = tileEvents().let { list -> list.firstOrNull { !it.allDay } ?: list.firstOrNull() }
 
     private fun timeOf(t: Long): String = DateFormat.getTimeFormat(context).format(java.util.Date(t))
 
-    /** "now", "in 25 min", "10:30", "all day", or "tomorrow 9:00" for later days. */
+    /**
+     * "now", "in 25 min", "10:30" or "all day"; with [withDay], the day is always said:
+     * "today 10:30", "today · all day", "tomorrow 9:00", "tomorrow · all day".
+     */
     fun whenText(e: CalEvent, withDay: Boolean = false): String {
         val n = now()
-        if (e.allDay) return "all day"
+        if (e.allDay) {
+            if (!withDay) return "all day"
+            val d = ((InfoTiles.dayOf(e.begin) - today()) / InfoTiles.DAY).toInt().coerceAtLeast(0)
+            return when (d) {
+                0 -> "today · all day"
+                1 -> "tomorrow · all day"
+                else -> dayName(e.begin, short = true) + " · all day"
+            }
+        }
         if (n >= e.begin && n < e.end) return "now · until ${timeOf(e.end)}"
         val mins = (e.begin - n) / 60_000L
         if (mins in 0..59) return "in ${mins.coerceAtLeast(1)} min"
         val dayDiff = ((InfoTiles.dayOf(e.begin) - today()) / InfoTiles.DAY).toInt()
         val time = timeOf(e.begin)
         return when {
-            !withDay || dayDiff == 0 -> time
+            !withDay -> time
+            dayDiff == 0 -> "today $time"
             dayDiff == 1 -> "tomorrow $time"
             else -> dayName(e.begin, short = true) + " " + time
         }
@@ -172,14 +191,9 @@ class InfoPainter(private val context: Context) {
         text.textSize = maxOf(sp(14f) * k, sp(11f))
         canvas.drawText(dayName(now()), pad, pad + big.textSize * 0.80f + text.textSize + dp(6f) * k, text)
         val left = w * 0.36f
-        val today = todayEvents()
-        if (today.isNotEmpty()) {
-            eventRows(canvas, today.take(3), left, pad, w - pad, h - pad, k, on, withDay = false)
-        } else {
-            // Nothing left today: straight to what's next.
-            val next = InfoTiles.events.filter { InfoTiles.dayOf(it.begin) > today() }.take(3)
-            if (next.isNotEmpty()) eventRows(canvas, next, left, pad, w - pad, h - pad, k, on, withDay = true)
-        }
+        // Today's and tomorrow's events only, each saying which day it is.
+        val list = tileEvents()
+        if (list.isNotEmpty()) eventRows(canvas, list.take(3), left, pad, w - pad, h - pad, k, on, withDay = true)
     }
 
     private fun drawCalendarLarge(canvas: Canvas, w: Float, h: Float, k: Float, on: Int) {

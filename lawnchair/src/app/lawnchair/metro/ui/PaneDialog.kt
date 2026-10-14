@@ -60,6 +60,10 @@ object PaneDialog {
         show(context, title, list, buttons = listOf("cancel" to {}, "done" to { onDone(state) }))
     }
 
+    /** Any content under a title, with buttons; the caller can dismiss the returned dialog. */
+    fun custom(context: Context, title: String, content: View, buttons: List<Pair<String, () -> Unit>>): Dialog =
+        show(context, title, content, buttons)
+
     private fun show(context: Context, title: String, content: View, buttons: List<Pair<String, () -> Unit>>): Dialog {
         val dialog = Dialog(context)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)

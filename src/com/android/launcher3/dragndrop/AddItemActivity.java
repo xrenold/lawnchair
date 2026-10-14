@@ -116,6 +116,8 @@ public class AddItemActivity extends BaseActivity
     private WidgetManagerHelper mAppWidgetManager;
     private int mPendingBindWidgetId;
     private Bundle mWidgetOptions;
+    /** Pane: the widget being pinned goes to Start, through Pane's widget host. */
+    private boolean mPaneWidget = false;
 
     private boolean mFinishOnPause = false;
 
@@ -365,6 +367,38 @@ public class AddItemActivity extends BaseActivity
             return;
         }
 
+        if (app.lawnchair.metro.MetroMode.isStartEnabled(this)) {
+            // Pane: an app asked to pin one of its widgets. It becomes a Start tile, hosted by
+            // Pane's own widget host (not the hidden Lawnchair home screen).
+            if (app.lawnchair.metro.data.LayoutLock.isLocked(this)) {
+                android.widget.Toast.makeText(this, "Start is locked. Unlock it to add tiles.",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                mSlideInView.close(/* animate= */ true);
+                return;
+            }
+            mPaneWidget = true;
+            mPendingBindWidgetId = app.lawnchair.metro.widgets.MetroWidgets.INSTANCE
+                    .host(this).allocateAppWidgetId();
+            AppWidgetProviderInfo info = mRequest.getAppWidgetProviderInfo(this);
+            boolean bound = false;
+            try {
+                bound = AppWidgetManager.getInstance(this).bindAppWidgetIdIfAllowed(
+                        mPendingBindWidgetId, info.getProfile(), info.provider, mWidgetOptions);
+            } catch (RuntimeException e) {
+                app.lawnchair.metro.CrashLog.event("widget", "pin bind failed", e);
+            }
+            if (bound) {
+                acceptWidget(mPendingBindWidgetId);
+                return;
+            }
+            Intent bind = new Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, mPendingBindWidgetId)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER_PROFILE, info.getProfile());
+            startActivityForResult(bind, REQUEST_BIND_APPWIDGET);
+            return;
+        }
+
         mPendingBindWidgetId = mAppWidgetHolder.allocateAppWidgetId();
         AppWidgetProviderInfo widgetProviderInfo = mRequest.getAppWidgetProviderInfo(this);
         boolean success = mAppWidgetManager.bindAppWidgetIdIfAllowed(
@@ -381,8 +415,16 @@ public class AddItemActivity extends BaseActivity
     }
 
     private void acceptWidget(int widgetId) {
-        ItemInstallQueue.INSTANCE.get(this)
-                .queueItem(mRequest.getAppWidgetProviderInfo(this), widgetId);
+        if (mPaneWidget) {
+            AppWidgetProviderInfo info = mRequest.getAppWidgetProviderInfo(this);
+            app.lawnchair.metro.data.MetroTileStore.get(this).addWidget(info.provider, widgetId,
+                    app.lawnchair.metro.widgets.MetroWidgets.INSTANCE.sizeFor(this, info));
+            app.lawnchair.metro.CrashLog.event("widget",
+                    "pinned " + info.provider.flattenToShortString() + " as " + widgetId);
+        } else {
+            ItemInstallQueue.INSTANCE.get(this)
+                    .queueItem(mRequest.getAppWidgetProviderInfo(this), widgetId);
+        }
         mWidgetOptions.putInt(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId);
         mRequest.accept(mWidgetOptions);
         logCommand(LAUNCHER_ADD_EXTERNAL_ITEM_PLACED_AUTOMATICALLY);
@@ -414,7 +456,11 @@ public class AddItemActivity extends BaseActivity
                 acceptWidget(widgetId);
             } else {
                 // Simply wait it out.
-                mAppWidgetHolder.deleteAppWidgetId(widgetId);
+                if (mPaneWidget) {
+                    app.lawnchair.metro.widgets.MetroWidgets.INSTANCE.delete(this, widgetId);
+                } else {
+                    mAppWidgetHolder.deleteAppWidgetId(widgetId);
+                }
                 mPendingBindWidgetId = -1;
             }
             return;

@@ -83,6 +83,8 @@ data class MetroTile(
         const val COLOR_ACCENT = 2
         /** 8.1 window mode: always a window onto the background (no automatic brand colour). */
         const val COLOR_WINDOW = 3
+        /** Widget tiles: keep the widget's own look instead of the tile's colour. */
+        const val COLOR_WIDGET = 4
 
         fun fromJson(o: JSONObject): MetroTile? {
             val cn = ComponentName.unflattenFromString(o.optString("component")) ?: return null
@@ -189,6 +191,50 @@ class MetroTileStore(private val context: Context) {
     fun addWidget(provider: ComponentName, widgetId: Int, size: TileSize) {
         val tiles = load()
         tiles += MetroTile(nextId(tiles), provider, size, kind = MetroTile.Kind.WIDGET, widgetId = widgetId)
+        save(tiles)
+        listeners.toList().forEach(Runnable::run)
+    }
+
+    /**
+     * Turns tile [tileId] into a widget, keeping its place, colour and lock (and its size, unless
+     * it's too small for a widget).
+     */
+    fun replaceWithWidget(tileId: Long, provider: ComponentName, widgetId: Int, fallbackSize: TileSize) {
+        val tiles = load()
+        val i = tiles.indexOfFirst { it.id == tileId }
+        if (i < 0) {
+            addWidget(provider, widgetId, fallbackSize)
+            return
+        }
+        val old = tiles[i]
+        tiles[i] = old.copy(
+            component = provider,
+            size = if (old.size == TileSize.SMALL) fallbackSize else old.size,
+            kind = MetroTile.Kind.WIDGET,
+            widgetId = widgetId,
+            shortcutId = null,
+            title = null,
+        )
+        save(tiles)
+        listeners.toList().forEach(Runnable::run)
+    }
+
+    /** Turns widget tile [tileId] back into [app]'s ordinary tile, in the same place. */
+    fun replaceWithApp(tileId: Long, app: ComponentName) {
+        val tiles = load()
+        val i = tiles.indexOfFirst { it.id == tileId }
+        if (i < 0) return
+        val old = tiles[i]
+        tiles[i] = old.copy(
+            component = app,
+            kind = MetroTile.Kind.APP,
+            widgetId = 0,
+            color = if (old.color == MetroTile.COLOR_WIDGET) 0 else old.color,
+            windowColor = if (old.windowColor == MetroTile.COLOR_WIDGET) 0 else old.windowColor,
+        )
+        // An app can only have one tile: drop a second one if the app was also pinned.
+        val dupe = tiles.indexOfFirst { it.id != tileId && it.isApp && it.component == app }
+        if (dupe >= 0) tiles.removeAt(dupe)
         save(tiles)
         listeners.toList().forEach(Runnable::run)
     }

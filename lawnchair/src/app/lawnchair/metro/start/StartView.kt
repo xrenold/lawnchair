@@ -400,6 +400,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         updateAlbumGradient(data)
         val visible = Rect()
         for (i in 0 until grid.childCount) {
+            (grid.getChildAt(i) as? WidgetTileView)?.let { wv ->
+                wv.count = data[wv.tile.component.packageName]?.count ?: 0
+            }
             val tv = grid.getChildAt(i) as? TileView ?: continue
             if (!tv.tile.isApp) continue
             val pkg = tv.tile.component.packageName
@@ -715,6 +718,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             for (i in 0 until grid.childCount) (grid.getChildAt(i) as? TileView)?.reloadIcon()
         }
         for (i in 0 until grid.childCount) (grid.getChildAt(i) as? TileView)?.refreshColors()
+        for (i in 0 until grid.childCount) (grid.getChildAt(i) as? WidgetTileView)?.refreshColors()
         arrow.invalidate()
         invalidate()
     }
@@ -778,7 +782,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private fun createTileView(tile: MetroTile): View {
         if (tile.kind == MetroTile.Kind.WIDGET) {
             val host = MetroWidgets.createView(launcher, tile.widgetId)
-            return WidgetTileView(launcher, tile, host) { beginDrag(it) }
+            return WidgetTileView(launcher, tile, host) { beginDrag(it) }.apply {
+                windowMode = this@StartView.windowMode
+                // Taps the widget doesn't take open its app.
+                setOnClickListener { openWidgetApp(this) }
+            }
         }
         return createAppTile(tile)
     }
@@ -794,6 +802,29 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             beginDrag(this)
             true
+        }
+    }
+
+    private fun openWidgetApp(view: WidgetTileView) {
+        val app = MetroWidgets.appFor(launcher, view.tile.component) ?: return
+        val bounds = Rect()
+        view.getGlobalVisibleRect(bounds)
+        val options = ActivityOptions.makeClipRevealAnimation(view, 0, 0, view.width, view.height).toBundle()
+        runCatching {
+            launcher.getSystemService(LauncherApps::class.java)?.startMainActivity(app, Process.myUserHandle(), bounds, options)
+            MetroUsage.recordLaunch(launcher, app.packageName)
+        }
+    }
+
+    /** Shows one of the app's widgets in place of [tile] (asking which, if it has several). */
+    private fun pickWidgetFor(tile: MetroTile) {
+        val widgets = MetroWidgets.providers(launcher, tile.component.packageName)
+        when {
+            widgets.isEmpty() -> Toast.makeText(launcher, "This app has no widgets", Toast.LENGTH_SHORT).show()
+            widgets.size == 1 -> MetroWidgets.add(launcher, widgets[0], replaceTileId = tile.id)
+            else -> app.lawnchair.metro.widgets.WidgetPicker.show(launcher, widgets) { info ->
+                MetroWidgets.add(launcher, info, replaceTileId = tile.id)
+            }
         }
     }
 
@@ -848,11 +879,15 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             sizes.setGroupCheckable(GROUP_SIZE, true, true)
         }
 
-        if (!isWidget) {
+        run {
             val colors = menu.menu.addSubMenu(Menu.NONE, MENU_COLOR, 1, "tile colour")
             // In 8.1 window mode the default is a window onto the background.
             colors.add(GROUP_COLOR, 0, 0, if (windowMode) "transparent" else "automatic")
-            colors.add(GROUP_COLOR, 1, 1, "brand colour")
+            if (isWidget) {
+                colors.add(GROUP_COLOR, COLOR_ITEM_WIDGET_OWN, 1, "widget's own look")
+            } else {
+                colors.add(GROUP_COLOR, 1, 1, "brand colour")
+            }
             MetroTheme.CLASSIC_ACCENTS.keys.forEachIndexed { i, name ->
                 colors.add(GROUP_COLOR, i + 3, i + 3, name)
             }
@@ -876,11 +911,22 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             }
             menu.menu.add(Menu.NONE, MENU_SLIDESHOW, 2, if (prefs.metroPhotoSlideshow.get()) "turn slideshow off" else "turn slideshow on")
         }
+        if (!locked && tile.isApp && MetroWidgets.hasWidgets(launcher, tile.component.packageName)) {
+            menu.menu.add(Menu.NONE, MENU_SHOW_WIDGET, 2, "show widget")
+        }
+        if (!locked && isWidget) {
+            if (MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
+                menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")
+            }
+            if (MetroWidgets.appFor(launcher, tile.component) != null) {
+                menu.menu.add(Menu.NONE, MENU_SHOW_APP_TILE, 2, "show app tile")
+            }
+        }
         if (!locked) {
             menu.menu.add(Menu.NONE, MENU_LOCK, 2, if (tile.locked) "unlock tile" else "lock tile (auto layout keeps it)")
-            menu.menu.add(Menu.NONE, MENU_UNPIN, 3, if (isWidget) "remove widget" else "unpin from start")
+            menu.menu.add(Menu.NONE, MENU_UNPIN, 3, "unpin from start")
         }
-        if (!isWidget) menu.menu.add(Menu.NONE, MENU_INFO, 4, "app info")
+        menu.menu.add(Menu.NONE, MENU_INFO, 4, "app info")
         if (locked) menu.menu.add(Menu.NONE, MENU_UNLOCK_LAYOUT, 5, "unlock layout")
 
         menu.showPane(view, Gravity.END) { item ->
@@ -893,6 +939,29 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 item.groupId == GROUP_LIVE -> {
                     val kind = listOf(InfoKind.CALENDAR, InfoKind.PHOTOS, InfoKind.WEATHER, InfoKind.CLOCK)[item.itemId]
                     InfoTiles.setApp(launcher, kind, tile.component.packageName) // Start reloads
+                }
+                item.itemId == MENU_SHOW_WIDGET -> pickWidgetFor(tile)
+                item.itemId == MENU_CHANGE_WIDGET -> {
+                    val widgets = MetroWidgets.providers(launcher, tile.component.packageName)
+                    app.lawnchair.metro.widgets.WidgetPicker.show(launcher, widgets) { info ->
+                        val oldId = tile.widgetId
+                        MetroWidgets.add(launcher, info, replaceTileId = tile.id)
+                        // The old widget goes once the new one is in (the store change rebuilds Start).
+                        store.addListener(object : Runnable {
+                            override fun run() {
+                                store.removeListener(this)
+                                if (store.load().none { it.widgetId == oldId }) MetroWidgets.delete(launcher, oldId)
+                            }
+                        })
+                    }
+                }
+                item.itemId == MENU_SHOW_APP_TILE -> {
+                    val app = MetroWidgets.appFor(launcher, tile.component)
+                    if (app != null) {
+                        val oldId = tile.widgetId
+                        store.replaceWithApp(tile.id, app)
+                        MetroWidgets.delete(launcher, oldId)
+                    }
                 }
                 item.itemId == MENU_PICK_PHOTOS -> app.lawnchair.metro.info.PhotoPicks.open(launcher, replace = true)
                 item.itemId == MENU_ADD_PHOTOS -> app.lawnchair.metro.info.PhotoPicks.open(launcher, replace = false)
@@ -907,6 +976,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 item.groupId == GROUP_COLOR -> {
                     val picked = when (item.itemId) {
                         0 -> 0
+                        COLOR_ITEM_WIDGET_OWN -> MetroTile.COLOR_WIDGET
                         1 -> MetroTile.COLOR_BRAND
                         2 -> MetroTile.COLOR_WINDOW
                         else -> MetroTheme.CLASSIC_ACCENTS.values.elementAt(item.itemId - 3)
@@ -914,6 +984,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     // 8.1 window mode keeps its own colour choice for each tile.
                     if (windowMode) tile.windowColor = picked else tile.color = picked
                     commit(view)
+                    (view as? WidgetTileView)?.refreshColors()
                     scheduleBrands()
                 }
                 item.itemId == MENU_UNPIN -> {
@@ -1383,6 +1454,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_UNLOCK_LAYOUT = 107
         private const val MENU_PICK_PHOTOS = 108
         private const val MENU_ADD_PHOTOS = 109
+        private const val MENU_SHOW_WIDGET = 110
+        private const val MENU_SHOW_APP_TILE = 111
+        private const val MENU_CHANGE_WIDGET = 112
+        private const val COLOR_ITEM_WIDGET_OWN = 99
         private const val GROUP_LIVE = 3
         private const val REQUEST_INFO_PERMISSIONS = 7400
         private const val GROUP_SIZE = 1

@@ -420,7 +420,7 @@ public class AddItemActivity extends BaseActivity
             app.lawnchair.metro.data.MetroTileStore.get(this).addWidget(info.provider, widgetId,
                     app.lawnchair.metro.widgets.MetroWidgets.INSTANCE.sizeFor(this, info));
             app.lawnchair.metro.CrashLog.event("widget",
-                    "pinned " + info.provider.flattenToShortString() + " as " + widgetId);
+                    "pinned " + info.provider.flattenToShortString() + " as " + widgetId, null);
         } else {
             ItemInstallQueue.INSTANCE.get(this)
                     .queueItem(mRequest.getAppWidgetProviderInfo(this), widgetId);

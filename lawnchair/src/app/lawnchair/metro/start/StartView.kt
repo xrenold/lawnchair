@@ -902,6 +902,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 }
             live.setGroupCheckable(GROUP_LIVE, true, true)
         }
+        if (view is TileView) menu.menu.add(Menu.NONE, MENU_TURN, 2, "turn over")
         val isPhotos = (view as? TileView)?.infoKind == InfoKind.PHOTOS
         if (isPhotos) {
             if (app.lawnchair.metro.info.PhotoPicks.pickerOnly) {
@@ -941,6 +942,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     InfoTiles.setApp(launcher, kind, tile.component.packageName) // Start reloads
                 }
                 item.itemId == MENU_SHOW_WIDGET -> pickWidgetFor(tile)
+                item.itemId == MENU_TURN -> (view as? TileView)?.let { tv -> postDelayed({ tv.turnOver() }, 150) }
                 item.itemId == MENU_CHANGE_WIDGET -> {
                     val widgets = MetroWidgets.providers(launcher, tile.component.packageName)
                     app.lawnchair.metro.widgets.WidgetPicker.show(launcher, widgets) { info ->
@@ -1346,6 +1348,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             lastTouchX = ev.x
             lastTouchY = ev.y
         }
+        if (handleTwoFingerTap(ev)) return true
         if (drag == null && (panel == null || panelSwipe.active) && panelSwipe.onTouch(ev)) return true
         if (panel != null && !panelSwipe.active) return super.dispatchTouchEvent(ev)
         if (drag == null && swipeDetector.onTouchEvent(ev)) {
@@ -1356,6 +1359,73 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             return true
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    // ---- Two-finger tap on a tile turns it over ----------------------------------------------
+
+    private var twoFingerTile: TileView? = null
+    private var twoFingerValid = false
+    private var twoFingerAt = 0L
+    private val twoFingerDown = FloatArray(4)
+
+    /**
+     * A quick tap with two fingers on the same tile turns it over (see [TileView.turnOver]). The
+     * tap never opens the app: as the second finger lands, the tile's own touch is cancelled.
+     */
+    private fun handleTwoFingerTap(ev: MotionEvent): Boolean {
+        val tv = twoFingerTile
+        if (tv == null) {
+            if (ev.actionMasked != MotionEvent.ACTION_POINTER_DOWN || ev.pointerCount != 2) return false
+            if (drag != null || panel != null || panProgress > 0f) return false
+            val a = tileViewAt(ev.getX(0), ev.getY(0)) ?: return false
+            if (tileViewAt(ev.getX(1), ev.getY(1)) !== a) return false
+            twoFingerTile = a
+            twoFingerValid = true
+            twoFingerAt = ev.eventTime
+            for (i in 0..1) {
+                twoFingerDown[i * 2] = ev.getX(i)
+                twoFingerDown[i * 2 + 1] = ev.getY(i)
+            }
+            val cancel = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_CANCEL }
+            super.dispatchTouchEvent(cancel)
+            cancel.recycle()
+            return true
+        }
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                val slop = touchSlop * 2
+                for (i in 0 until minOf(ev.pointerCount, 2)) {
+                    if (abs(ev.getX(i) - twoFingerDown[i * 2]) > slop || abs(ev.getY(i) - twoFingerDown[i * 2 + 1]) > slop) {
+                        twoFingerValid = false
+                    }
+                }
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> twoFingerValid = false // a third finger
+            MotionEvent.ACTION_UP -> {
+                if (twoFingerValid && ev.eventTime - twoFingerAt < 500) {
+                    tv.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    tv.turnOver()
+                }
+                twoFingerTile = null
+            }
+            MotionEvent.ACTION_CANCEL -> twoFingerTile = null
+        }
+        return true
+    }
+
+    /** The app tile under ([x], [y]) in this view, by layout position. */
+    private fun tileViewAt(x: Float, y: Float): TileView? {
+        getLocationOnScreen(hostLoc)
+        grid.getLocationOnScreen(viewLoc)
+        val gx = viewLoc[0] - hostLoc[0] - grid.scrollX
+        val gy = viewLoc[1] - hostLoc[1] - grid.scrollY
+        for (v in grid.tiles) {
+            val tv = v as? TileView ?: continue
+            val l = gx + tv.left
+            val t = gy + tv.top
+            if (x >= l && x < l + tv.width && y >= t && y < t + tv.height) return tv
+        }
+        return null
     }
 
     // ---- Notification panel (swipe right on a tile) ------------------------------------------
@@ -1393,7 +1463,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             if (tv.infoKind == InfoKind.CALENDAR && InfoTiles.hasPermission(launcher, android.Manifest.permission.READ_CALENDAR)) {
                 return NotificationPanel.Target(pkg, tv.label, tv.iconInfo?.brandColor ?: 0, Rect(l, t, l + tv.width, t + tv.height), tv, agenda = true)
             }
-            if ((tv.live?.count ?: 0) == 0 || !LiveTileData.hasPanelContent(pkg)) return null
+            // Unread notifications, or something ongoing (navigation, a download, a timer).
+            if (!LiveTileData.hasPanelContent(pkg)) return null
             val brand = tv.iconInfo?.brandColor ?: 0
             return NotificationPanel.Target(pkg, tv.label, brand, Rect(l, t, l + tv.width, t + tv.height), tv)
         }
@@ -1455,6 +1526,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_PICK_PHOTOS = 108
         private const val MENU_ADD_PHOTOS = 109
         private const val MENU_SHOW_WIDGET = 110
+        private const val MENU_TURN = 113
         private const val MENU_SHOW_APP_TILE = 111
         private const val MENU_CHANGE_WIDGET = 112
         private const val COLOR_ITEM_WIDGET_OWN = 99

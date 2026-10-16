@@ -93,7 +93,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private val search = EditText(launcher)
     private val list = RecyclerView(launcher)
-    private val scrubber = AlphabetScrubber(launcher) { jumpTo(it) }
+    private val scrubber = AlphabetScrubber(launcher) { letter, y -> jumpTo(letter, y) }
     private val sectionPositions = HashMap<Char, Int>()
 
     /** Black behind the status bar, and behind the search bar at the bottom. */
@@ -168,7 +168,11 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         list.itemAnimator = null
         list.addItemDecoration(WindowMask())
         // Scrolling the results, or tapping empty space, puts the keyboard away.
+        // A finger on the letters stops a moving list before it jumps.
+        scrubber.onTouchStart = { list.stopScroll() }
         list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) = updateScrolledLetter()
+
             override fun onScrollStateChanged(rv: RecyclerView, newState: Int) {
                 if (newState == RecyclerView.SCROLL_STATE_DRAGGING && search.hasFocus()) {
                     hideKeyboard()
@@ -305,13 +309,16 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             val reserved = navInset + searchMargin * 2 + searchHeight + imeLift
             (list.layoutParams as LayoutParams).bottomMargin = reserved
             (searchPanel.layoutParams as LayoutParams).height = reserved
-            scrubber.bottomInset = reserved.toFloat()
+            // The letters keep their size; while the keyboard is up they're hidden instead.
+            scrubber.bottomInset = (navInset + searchMargin * 2 + searchHeight).toFloat()
+            updateScrubberVisibility()
             (scrubber.layoutParams as LayoutParams).bottomMargin = 0
             list.requestLayout()
             searchPanel.requestLayout()
             scrubber.invalidate()
         }
         search.requestLayout()
+        updateScrubberVisibility()
     }
 
     override fun onAttachedToWindow() {
@@ -402,14 +409,41 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         }
         layoutManager.stackFromEnd = query.isNotEmpty()
         scrubber.available = sectionPositions.keys.toSet()
-        scrubber.visibility = if (query.isEmpty()) VISIBLE else GONE
+        updateScrubberVisibility()
         refreshList()
         if (query.isNotEmpty()) list.scrollToPosition((rows.size - 1).coerceAtLeast(0))
     }
 
-    private fun jumpTo(letter: Char) {
+    /**
+     * Jumps to [letter], with its heading level with the finger ([fingerY], in this view) so
+     * the apps land under your thumb rather than at the top of the screen. Near the ends the
+     * list can't move that far and simply stops at the edge.
+     */
+    private fun jumpTo(letter: Char, fingerY: Float) {
         val pos = sectionPositions[letter] ?: return
-        layoutManager.scrollToPositionWithOffset(pos, 0)
+        val headerHalf = dp(20f)
+        val offset = (fingerY - list.top - list.paddingTop - headerHalf).toInt().coerceAtLeast(0)
+        layoutManager.scrollToPositionWithOffset(pos, offset)
+        scrubber.scrolledTo = letter
+    }
+
+    /** Lights the letter of the section at the top of the list as it scrolls. */
+    private fun updateScrolledLetter() {
+        if (sectionPositions.isEmpty()) return
+        val first = layoutManager.findFirstVisibleItemPosition()
+        if (first < 0) return
+        var i = first.coerceAtMost(rows.size - 1)
+        // The first row may be partly under the status bar: use the one at the list's top edge.
+        list.findChildViewUnder(list.width / 2f, list.paddingTop + dp(4f))?.let { v ->
+            list.getChildAdapterPosition(v).takeIf { it >= 0 }?.let { i = it }
+        }
+        while (i >= 0 && rows[i] !is Row.Header) i--
+        scrubber.scrolledTo = (rows.getOrNull(i) as? Row.Header)?.letter
+    }
+
+    private fun updateScrubberVisibility() {
+        val query = search.text?.toString()?.trim().orEmpty()
+        scrubber.visibility = if (query.isEmpty() && imeLift == 0) VISIBLE else GONE
     }
 
     @SuppressLint("NotifyDataSetChanged")
@@ -423,6 +457,14 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         isOpen = true
         visibility = VISIBLE
         list.scrollToPosition(0)
+        // The keyboard may have closed while we were away: measure again for how things are now.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            rootWindowInsets?.let { applyIme(it, relayout = true) }
+        } else {
+            imeLift = 0
+            layoutForKeyboard(relayout = true)
+        }
+        post { updateScrolledLetter() }
         animatePan(1f)
         postDelayed({ if (isOpen) launcher.startView?.offerTip(app.lawnchair.metro.start.PaneTips.Tip.LETTERS) }, 700)
     }

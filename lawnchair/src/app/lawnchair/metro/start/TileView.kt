@@ -1023,6 +1023,20 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     /** The Photos tile wants to turn (to the next photo, its icon, or back). */
     fun photoWantsTurn(): Boolean = infoKind == InfoKind.PHOTOS && slideshow?.wantsTurn() == true && !flipping
 
+    /**
+     * Turned over by hand (two-finger tap, or "turn over" in its menu): the photo tile goes to
+     * its next photo, a tile with content flips between its icon and the content, and any
+     * other tile gives a single turn.
+     */
+    fun turnOver() {
+        if (flipping) return
+        when {
+            infoKind == InfoKind.PHOTOS && slideshow != null -> turnPhoto()
+            hasBackFace || showingBack -> flip()
+            else -> turn(swap = false)
+        }
+    }
+
     /** Turns the Photos tile over; what the other side shows is decided by its slideshow. */
     fun turnPhoto() {
         val show = slideshow ?: return

@@ -169,6 +169,8 @@ object LiveTileData {
                 val image = cachedIcon(context, sbn)
                 val nav = sbn.notification.category == Notification.CATEGORY_NAVIGATION
                 byPackage[sbn.packageName] = (prev ?: LiveInfo(sbn.packageName)).copy(
+                    // The ongoing notification opens in the Start panel too (calls excepted).
+                    panelCount = (prev?.panelCount ?: 0) + if (isCall(sbn)) 0 else 1,
                     title = e.getCharSequence(Notification.EXTRA_TITLE)?.toString(),
                     text = (e.getCharSequence(Notification.EXTRA_TEXT) ?: e.getCharSequence(Notification.EXTRA_SUB_TEXT))?.toString(),
                     image = image,
@@ -250,7 +252,7 @@ object LiveTileData {
     fun notificationsFor(pkg: String): List<StatusBarNotification> {
         val listener = NotificationListener.getInstanceIfConnected() ?: return emptyList()
         val active = runCatching { listener.activeNotifications }.getOrNull() ?: return emptyList()
-        return active.filter { it.packageName == pkg && isUserFacing(it) && !isCall(it) }
+        return active.filter { it.packageName == pkg && (isUserFacing(it) || isOngoingWorth(it)) && !isCall(it) }
             .sortedByDescending { it.postTime }
     }
 

@@ -126,7 +126,7 @@ class TileGridView(context: Context) : ViewGroup(context) {
     }
 
     /** Space above the first row: half a group gap. */
-    val topSpace: Int get() = groupGap / 2
+    val topSpace: Int get() = groupGap / 4
 
     /** Rows before which a group gap sits. */
     private var gapRows = IntArray(0)

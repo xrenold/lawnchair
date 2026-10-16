@@ -28,7 +28,18 @@ import kotlin.math.exp
  * that start on the column itself are taken.
  */
 @SuppressLint("ViewConstructor")
-class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) : View(context) {
+class AlphabetScrubber(context: Context, private val onLetter: (letter: Char, fingerY: Float) -> Unit) : View(context) {
+
+    /** Called as a finger lands on the letters (the list stops moving first). */
+    var onTouchStart: (() -> Unit)? = null
+
+    /** The section the list is showing while you scroll; lit in the accent colour. */
+    var scrolledTo: Char? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            if (active == 0f) invalidate()
+        }
 
     var letters: List<Char> = LETTERS
     var available: Set<Char> = emptySet()
@@ -83,7 +94,7 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
             val influence = active * exp(-(d * d) / (2f * 2.4f * 2.4f))
             val x = baseX - influence * waveReach
             val scale = 1f + influence * 1.1f
-            val isCurrent = active > 0f && c == current
+            val isCurrent = (active > 0f && c == current) || (active == 0f && c == scrolledTo)
             val has = c in available
             letterPaint.textSize = baseSize * scale
             letterPaint.color = when {
@@ -119,6 +130,7 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
             MotionEvent.ACTION_DOWN -> {
                 if (ev.x < width - columnWidth - dp(8f) || ev.y < letterTop - dp(8f) || spacing() <= 0f) return false
                 parent?.requestDisallowInterceptTouchEvent(true)
+                onTouchStart?.invoke()
                 animateActive(1f)
                 track(ev.y)
                 return true
@@ -143,7 +155,7 @@ class AlphabetScrubber(context: Context, private val onLetter: (Char) -> Unit) :
         if (target != null && target != current) {
             current = target
             performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-            onLetter(target)
+            onLetter(target, y)
         }
         invalidate()
     }

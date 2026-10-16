@@ -23,9 +23,18 @@ import com.android.launcher3.BuildConfig
  */
 object PhotoPicks {
 
-    /** True in the Play build: no library access, the tile uses picked photos. */
+    /** The Play build: no library access, the tile always uses picked photos. */
     @JvmStatic
-    val pickerOnly: Boolean get() = BuildConfig.PHOTO_PICKER_ONLY
+    val pickerForced: Boolean get() = BuildConfig.PHOTO_PICKER_ONLY
+
+    /**
+     * The tile shows picked photos: always in the Play build, and in the GitHub build when
+     * "chosen photos only" is on.
+     */
+    @JvmStatic
+    val pickerOnly: Boolean get() = pickerForced || runCatching {
+        PreferenceManager.getInstance(app.lawnchair.LawnchairApp.instance).metroPhotosChosenOnly.get()
+    }.getOrDefault(false)
 
     /** Most photos kept at once. Android caps persisted grants per app, so stay well below. */
     private const val MAX = 100

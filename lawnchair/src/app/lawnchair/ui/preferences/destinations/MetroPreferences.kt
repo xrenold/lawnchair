@@ -220,6 +220,21 @@ fun MetroPreferenceGroups() {
                 label = "show all-day events",
                 description = "On the calendar tile and agenda",
             )
+            if (!app.lawnchair.metro.info.PhotoPicks.pickerForced) {
+                val chosenOnly = prefs.metroPhotosChosenOnly.getAdapter()
+                SwitchPreference(
+                    adapter = chosenOnly,
+                    label = "chosen photos only",
+                    description = if (chosenOnly.state.value) {
+                        "The Photos tile shows only photos you choose. Choose them under setup & permissions, or from the tile's menu."
+                    } else {
+                        "Off: the Photos tile picks from your recent camera photos"
+                    },
+                )
+                androidx.compose.runtime.LaunchedEffect(chosenOnly.state.value) {
+                    app.lawnchair.metro.info.InfoTiles.reloadPhotos()
+                }
+            }
             SwitchPreference(
                 adapter = prefs.metroPhotoSlideshow.getAdapter(),
                 label = "photo slideshow",

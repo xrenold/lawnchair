@@ -111,6 +111,9 @@ class PreferenceManager @Inject constructor(
     /** Play build: photos picked for the Photos tile (content URIs, one per line). */
     val metroPickedPhotos = StringPref("pref_metroPickedPhotos", "")
 
+    /** GitHub build: the Photos tile shows only photos chosen with the picker (Play always does). */
+    val metroPhotosChosenOnly = BoolPref("pref_metroPhotosChosenOnly", false)
+
     /** Pane's first-run setup has been shown (or skipped). */
     val paneOnboarded = BoolPref("pref_paneOnboarded", false)
     /** Also set the phone's home screen wallpaper when applying a Start background photo. */

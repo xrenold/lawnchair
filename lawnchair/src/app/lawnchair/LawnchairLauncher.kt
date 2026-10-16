@@ -346,12 +346,48 @@ class LawnchairLauncher : QuickstepLauncher() {
         }
     }
 
+    /** The Start settings the current Start screen was built with (see [rebuildStartIfChanged]). */
+    private var startBuiltWith: String? = null
+
+    /** Settings Start reads once, when it's built: columns, background, colours, icons. */
+    private fun startSignature(): String = with(app.lawnchair.preferences.PreferenceManager.getInstance(this)) {
+        listOf(
+            metroShowMoreTiles.get(), metroBackground.get(), metroAppListPhoto.get(), metroColorMode.get(),
+            metroClassicAccent.get(), metroIconSize.get(), metroBackgroundPhoto.get(), metroIconPack.get(),
+            metroBackgroundKind.get(), metroAppCalendar.get(), metroAppPhotos.get(), metroAppWeather.get(),
+            metroAppClock.get(), metroLiveTiles.get(), metroLegibility.get(),
+        ).joinToString("|")
+    }
+
+    /**
+     * Rebuilds Start if one of those settings changed while we were away (in Pane's settings or
+     * setup). Changing them asks for the whole home screen to restart, but Android doesn't always
+     * do that for an activity in the background; this makes the change show regardless.
+     */
+    private fun rebuildStartIfChanged() {
+        val old = startView ?: return
+        if (startBuiltWith == startSignature()) return
+        val layer = dragLayer
+        val index = layer.indexOfChild(old)
+        metroAppList?.close(animate = false)
+        metroAppList?.let { layer.removeView(it) }
+        layer.removeView(old)
+        startView = null
+        metroAppList = null
+        buildStartViews(if (index >= 0) index else null)
+    }
+
     /** Puts the Start screen above the (hidden) workspace and dock, below the drawer and overview. */
     private fun addStartView() {
         addBackAnimationCallback(metroBackHandler)
+        buildStartViews(null)
+    }
+
+    private fun buildStartViews(at: Int?) {
+        startBuiltWith = startSignature()
         val layer = dragLayer
         val anchor = findViewById<View>(R.id.page_indicator) ?: hotseat
-        val index = layer.indexOfChild(anchor).let { if (it < 0) 1 else it + 1 }
+        val index = at ?: layer.indexOfChild(anchor).let { if (it < 0) 1 else it + 1 }
         val view = StartView(this)
         layer.addView(
             view,
@@ -609,6 +645,7 @@ class LawnchairLauncher : QuickstepLauncher() {
         if (metroAwayInApp && metroAppList?.isOpen != true) startView?.post { startView?.playLanding() }
         metroAwayInApp = false
         restartIfPending()
+        rebuildStartIfChanged()
         refreshPredictionContainersFromModel()
 
         dragLayer.viewTreeObserver.addOnDrawListener(

@@ -697,8 +697,13 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private val whiteVeil: Boolean
         get() = MetroTheme.isLight(launcher) && background == MetroTheme.BG_WALLPAPER
 
-    private fun veilFor(lum: Float, level: Int): Float =
-        if (whiteVeil) (BackgroundDim.dimFor(1f - lum, level) + 0.3f).coerceAtMost(0.75f) else BackgroundDim.dimFor(lum, level)
+    private fun veilFor(lum: Float, level: Int): Float = when {
+        whiteVeil -> (BackgroundDim.dimFor(1f - lum, level) + 0.3f).coerceAtMost(0.75f)
+        // Light theme, see-through tiles: a dimmed photo looks muddy grey inside a white frame,
+        // as on Windows Phone the photo stays close to itself; label shadows carry legibility.
+        MetroTheme.isLight(launcher) -> BackgroundDim.dimFor(lum, level) * 0.3f
+        else -> BackgroundDim.dimFor(lum, level)
+    }
 
     /** Measures the background's brightness and sets the dim to match. */
     private fun updateDim() {

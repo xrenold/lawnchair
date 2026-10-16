@@ -415,26 +415,27 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     }
 
     /**
-     * Jumps to [letter], with its heading level with the finger ([fingerY], in this view) so
-     * the apps land under your thumb rather than at the top of the screen. Near the ends the
-     * list can't move that far and simply stops at the edge.
+     * Jumps to [letter], with its heading at the middle of the screen, so the apps land within
+     * thumb reach rather than at the top. Near the ends the list can't move that far and simply
+     * stops at the edge.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun jumpTo(letter: Char, fingerY: Float) {
         val pos = sectionPositions[letter] ?: return
         val headerHalf = dp(20f)
-        val offset = (fingerY - list.top - list.paddingTop - headerHalf).toInt().coerceAtLeast(0)
+        val offset = (height / 2f - list.top - list.paddingTop - headerHalf).toInt().coerceAtLeast(0)
         layoutManager.scrollToPositionWithOffset(pos, offset)
         scrubber.scrolledTo = letter
     }
 
-    /** Lights the letter of the section at the top of the list as it scrolls. */
+    /** Lights the letter of the section at the middle of the screen as the list scrolls. */
     private fun updateScrolledLetter() {
         if (sectionPositions.isEmpty()) return
         val first = layoutManager.findFirstVisibleItemPosition()
         if (first < 0) return
         var i = first.coerceAtMost(rows.size - 1)
-        // The first row may be partly under the status bar: use the one at the list's top edge.
-        list.findChildViewUnder(list.width / 2f, list.paddingTop + dp(4f))?.let { v ->
+        // The row at the middle of the screen, where a jump puts its letter.
+        list.findChildViewUnder(list.width / 2f, height / 2f - list.top)?.let { v ->
             list.getChildAdapterPosition(v).takeIf { it >= 0 }?.let { i = it }
         }
         while (i >= 0 && rows[i] !is Row.Header) i--

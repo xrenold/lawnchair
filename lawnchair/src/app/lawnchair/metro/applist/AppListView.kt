@@ -739,10 +739,18 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                     Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null))
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
-                3 -> launcher.startActivity(
-                    Intent(Intent.ACTION_DELETE, Uri.fromParts("package", pkg, null))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
+                3 -> runCatching {
+                    launcher.startActivity(
+                        Intent(Intent.ACTION_DELETE, Uri.fromParts("package", pkg, null))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }.onFailure {
+                    // Some phones refuse; the app's info page has its own uninstall button.
+                    launcher.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
             }
             true
         }

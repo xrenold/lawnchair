@@ -1,6 +1,7 @@
 name: Pane builds
 
-# On every push to the metro branch (or on demand from the Actions tab):
+# Builds run only when the metro branch moves (work is done on pane-dev and merged into metro
+# when it's time for a build), or on demand from the Actions tab ("Run workflow"):
 # - "apk": the GitHub test build, published to the rolling "pane-latest" release.
 # - "play": the Google Play bundle (.aab), kept as a run artifact. It's signed with the
 #   upload key when the PANE_UPLOAD_* secrets are set (see PLAY.md).
@@ -9,7 +10,6 @@ on:
   push:
     branches:
       - 'metro'
-      - 'metro-*'
     paths-ignore:
       - '**.md'
   workflow_dispatch:

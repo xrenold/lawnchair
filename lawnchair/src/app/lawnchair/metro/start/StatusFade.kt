@@ -16,6 +16,8 @@ class StatusFade(context: Context) : View(context) {
 
     private val paint = Paint()
     private var shaderH = -1
+    /** Black, or white in the light theme. */
+    private val tone = app.lawnchair.metro.theme.MetroTheme.surface(context) and 0xFFFFFF
 
     init {
         setWillNotDraw(false)
@@ -29,7 +31,7 @@ class StatusFade(context: Context) : View(context) {
             // Solid for the top third (behind the status icons), then an eased fade to clear.
             paint.shader = LinearGradient(
                 0f, 0f, 0f, h.toFloat(),
-                intArrayOf(0xFF000000.toInt(), 0xFF000000.toInt(), 0xE0000000.toInt(), 0x99000000.toInt(), 0x4D000000, 0x14000000, 0),
+                intArrayOf(0xFF, 0xFF, 0xE0, 0x99, 0x4D, 0x14, 0).map { (it shl 24) or tone }.toIntArray(),
                 floatArrayOf(0f, 0.36f, 0.5f, 0.64f, 0.78f, 0.9f, 1f),
                 Shader.TileMode.CLAMP,
             )

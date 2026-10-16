@@ -104,8 +104,17 @@ class NotificationPanel(
         else -> MetroTheme.accent(context)
     }
     /** Light brand tone for actions and the reply button. */
-    private val actionTone = ColorUtils.blendARGB(brandTone, Color.WHITE, 0.35f)
-    private val surface = ColorUtils.blendARGB(0xFF1C1C1C.toInt(), brandTone, 0.09f)
+    private val light = MetroTheme.isLight(context)
+    private val actionTone = if (light) {
+        ColorUtils.blendARGB(brandTone, Color.BLACK, 0.25f)
+    } else {
+        ColorUtils.blendARGB(brandTone, Color.WHITE, 0.35f)
+    }
+    private val surface = if (light) {
+        ColorUtils.blendARGB(0xFFF4F4F4.toInt(), brandTone, 0.07f)
+    } else {
+        ColorUtils.blendARGB(0xFF1C1C1C.toInt(), brandTone, 0.09f)
+    }
 
     private val sheet = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -146,7 +155,7 @@ class NotificationPanel(
 
         header.apply {
             text = target.label.toString().lowercase()
-            setTextColor(Color.WHITE)
+            setTextColor(MetroTheme.ink(context))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             typeface = app.lawnchair.metro.theme.PaneFonts.light
             setPadding(dp(16f).toInt(), dp(12f).toInt(), dp(16f).toInt(), dp(4f).toInt())
@@ -167,10 +176,10 @@ class NotificationPanel(
             setPadding(dp(16f).toInt(), dp(4f).toInt(), dp(8f).toInt(), dp(8f).toInt())
         }
         replyField.apply {
-            setTextColor(Color.WHITE)
-            setHintTextColor(0x80FFFFFF.toInt())
+            setTextColor(MetroTheme.ink(context))
+            setHintTextColor(MetroTheme.ink(context, 0x80))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-            background = GradientDrawable().apply { setStroke(dp(1f).toInt(), 0x66FFFFFF) }
+            background = GradientDrawable().apply { setStroke(dp(1f).toInt(), MetroTheme.ink(context, 0x66)) }
             setPadding(dp(10f).toInt(), dp(8f).toInt(), dp(10f).toInt(), dp(8f).toInt())
             imeOptions = EditorInfo.IME_ACTION_SEND
             maxLines = 4
@@ -261,7 +270,7 @@ class NotificationPanel(
         if (shown.isEmpty()) {
             list.addView(TextView(context).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
                 text = "nothing in the next 7 days"
-                setTextColor(0xB3FFFFFF.toInt())
+                setTextColor(MetroTheme.ink(context, 0xB3))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 setPadding(dp(16f).toInt(), dp(8f).toInt(), dp(16f).toInt(), dp(16f).toInt())
             })
@@ -307,14 +316,14 @@ class NotificationPanel(
         val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         texts.addView(TextView(context).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
             text = e.title
-            setTextColor(Color.WHITE)
+            setTextColor(MetroTheme.ink(context))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         })
         texts.addView(TextView(context).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
             text = if (e.location != null) "$time · ${e.location}" else time
-            setTextColor(0xB3FFFFFF.toInt())
+            setTextColor(MetroTheme.ink(context, 0xB3))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -627,7 +636,7 @@ class NotificationPanel(
             }
             top.addView(TextView(context).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
                 text = title
-                setTextColor(Color.WHITE)
+                setTextColor(MetroTheme.ink(context))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 typeface = app.lawnchair.metro.theme.PaneFonts.semibold
                 maxLines = 1
@@ -635,7 +644,7 @@ class NotificationPanel(
             }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             top.addView(TextView(context).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
                 text = DateUtils.getRelativeTimeSpanString(sbn.postTime, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE)
-                setTextColor(0x99FFFFFF.toInt())
+                setTextColor(MetroTheme.ink(context, 0x99))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             })
             addView(top)
@@ -643,7 +652,7 @@ class NotificationPanel(
             if (!body.isNullOrBlank()) {
                 addView(TextView(context).apply { typeface = app.lawnchair.metro.theme.PaneFonts.regular
                     text = body
-                    setTextColor(0xD9FFFFFF.toInt())
+                    setTextColor(MetroTheme.ink(context, 0xD9))
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
                     maxLines = 4
                     ellipsize = TextUtils.TruncateAt.END

@@ -25,7 +25,8 @@ class UndoBar(context: Context) : LinearLayout(context) {
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(0xF0202020.toInt())
+        val light = app.lawnchair.metro.theme.MetroTheme.isLight(context)
+        setBackgroundColor(if (light) 0xF0E8E8E8.toInt() else 0xF0202020.toInt())
         val pad = dp(16f).toInt()
         setPadding(pad, dp(12f).toInt(), pad, dp(12f).toInt())
 
@@ -33,7 +34,7 @@ class UndoBar(context: Context) : LinearLayout(context) {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        message.setTextColor(Color.WHITE)
+        message.setTextColor(app.lawnchair.metro.theme.MetroTheme.ink(context))
         message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
         message.typeface = app.lawnchair.metro.theme.PaneFonts.regular
         row.addView(message, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -45,7 +46,7 @@ class UndoBar(context: Context) : LinearLayout(context) {
         row.addView(undo)
         addView(row)
 
-        hint.setTextColor(0xB3FFFFFF.toInt())
+        hint.setTextColor(app.lawnchair.metro.theme.MetroTheme.ink(context, 0xB3))
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
         hint.setPadding(0, dp(6f).toInt(), 0, 0)
         addView(hint)

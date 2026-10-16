@@ -83,6 +83,8 @@ class AlphabetScrubber(context: Context, private val onLetter: (letter: Char, fi
     override fun onDraw(canvas: Canvas) {
         if (letters.isEmpty()) return
         val accent = MetroTheme.accent(context)
+        val ink = MetroTheme.ink(context)
+        val dimInk = MetroTheme.ink(context, 0x55)
         val baseX = width - columnWidth / 2f
         val gap = spacing()
         val baseSize = minOf(sp(11f), gap * 0.8f)
@@ -99,8 +101,8 @@ class AlphabetScrubber(context: Context, private val onLetter: (letter: Char, fi
             letterPaint.textSize = baseSize * scale
             letterPaint.color = when {
                 isCurrent -> accent
-                has -> Color.WHITE
-                else -> 0x55FFFFFF
+                has -> ink
+                else -> dimInk
             }
             letterPaint.alpha = if (has || isCurrent) (170 + 85 * influence).toInt().coerceAtMost(255) else 70
             val fm = letterPaint.fontMetrics

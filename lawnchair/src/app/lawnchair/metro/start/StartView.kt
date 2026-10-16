@@ -117,6 +117,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         InfoTiles.loadOverrides(launcher)
         when (background) {
             MetroTheme.BG_BLACK -> setBackgroundColor(Color.BLACK)
+            MetroTheme.BG_WHITE -> setBackgroundColor(Color.WHITE)
             else -> setBackgroundColor(Color.TRANSPARENT)
         }
 
@@ -129,7 +130,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             true
         }
         // WP 8.1 parallax: our own background photo, drifting slower than the tiles.
-        if (background != MetroTheme.BG_BLACK && prefs.metroBackgroundPhoto.get() > 0) {
+        if (!MetroTheme.isPlain(background) && prefs.metroBackgroundPhoto.get() > 0) {
             val bg = ParallaxBackgroundView(launcher)
             bg.load()
             if (bg.hasImage) {
@@ -138,7 +139,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 scroller.onScrollFraction = { bg.setScrollFraction(it) }
             }
         }
-        if (background != MetroTheme.BG_BLACK) {
+        if (!MetroTheme.isPlain(background)) {
             addView(dimView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             updateDim()
         }
@@ -637,7 +638,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     // ---- Gradient background: album colours while music plays -------------------------------
 
     private val gradientBackground: Boolean
-        get() = background != MetroTheme.BG_BLACK && prefs.metroBackgroundKind.get() == "gradient" && parallax != null
+        get() = !MetroTheme.isPlain(background) && prefs.metroBackgroundKind.get() == "gradient" && parallax != null
     private var albumKey: String? = null
     private var lastPlayingAt = 0L
     private val albumWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -690,7 +691,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     /** Measures the background's brightness and sets the dim to match. */
     private fun updateDim() {
-        if (background == MetroTheme.BG_BLACK) return
+        if (MetroTheme.isPlain(background)) return
         val level = prefs.metroLegibility.get()
         if (level == 0) {
             dimView.alpha = 0f

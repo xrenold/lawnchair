@@ -64,6 +64,7 @@ fun MetroPreferenceGroups() {
                 label = "background",
                 entries = listOf(
                     ListPreferenceEntry(MetroTheme.BG_BLACK) { "black" },
+                    ListPreferenceEntry(MetroTheme.BG_WHITE) { "white (light theme)" },
                     ListPreferenceEntry(MetroTheme.BG_WALLPAPER) { "wallpaper" },
                     ListPreferenceEntry(MetroTheme.BG_WINDOW) { "wallpaper through tiles" },
                 ),
@@ -78,7 +79,7 @@ fun MetroPreferenceGroups() {
         }
     }
 
-    ExpandAndShrink(visible = startEnabled.state.value && prefs.metroBackground.getAdapter().state.value != MetroTheme.BG_BLACK) {
+    ExpandAndShrink(visible = startEnabled.state.value && !MetroTheme.isPlain(prefs.metroBackground.getAdapter().state.value)) {
         PreferenceGroup(heading = "background photo") {
             val context = LocalContext.current
             val photoVersion = prefs.metroBackgroundPhoto.getAdapter()

@@ -98,7 +98,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     /** Black behind the status bar, and behind the search bar at the bottom. */
     private val statusStrip = app.lawnchair.metro.start.StatusFade(launcher)
-    private val searchPanel = View(launcher).apply { setBackgroundColor(Color.BLACK) }
+    private val searchPanel = View(launcher).apply { setBackgroundColor(MetroTheme.surface(launcher)) }
 
     private val background = MetroTheme.background(launcher)
     /**
@@ -237,8 +237,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private fun setupSearch() {
         search.hint = "search apps"
-        search.setHintTextColor(0x99FFFFFF.toInt())
-        search.setTextColor(Color.WHITE)
+        search.setHintTextColor(MetroTheme.ink(context, 0x99))
+        search.setTextColor(MetroTheme.ink(context))
         search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
         search.typeface = app.lawnchair.metro.theme.PaneFonts.light
         search.isSingleLine = true
@@ -246,8 +246,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         search.setPadding(dp(16f).toInt(), 0, dp(16f).toInt(), 0)
         search.background = GradientDrawable().apply {
             cornerRadius = dp(4f)
-            setColor(0x26FFFFFF)
-            setStroke(dp(1f).toInt(), 0x33FFFFFF)
+            setColor(MetroTheme.ink(context, 0x14))
+            setStroke(dp(1f).toInt(), MetroTheme.ink(context, 0x33))
         }
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -845,7 +845,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = app.lawnchair.metro.theme.PaneFonts.light
             textSize = sp(22f)
-            color = Color.WHITE
+            color = MetroTheme.ink(context)
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -878,12 +878,12 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         private val name = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = app.lawnchair.metro.theme.PaneFonts.regular
             textSize = sp(17f)
-            color = Color.WHITE
+            color = MetroTheme.ink(context)
         }
         private val sub = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = app.lawnchair.metro.theme.PaneFonts.regular
             textSize = sp(13f)
-            color = 0x99FFFFFF.toInt()
+            color = MetroTheme.ink(context, 0x99)
         }
         private val r = RectF()
         private val iconRect = RectF()

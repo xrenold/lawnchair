@@ -54,6 +54,33 @@ object MetroTheme {
     const val BG_BLACK = "black"
     const val BG_WALLPAPER = "wallpaper"
     const val BG_WINDOW = "window"
+    /** Windows Phone's light theme: a white Start and app list, with black text. */
+    const val BG_WHITE = "white"
+
+    /** Light theme: Pane's own surfaces (Start, app list, menus, panels) are white. */
+    @JvmStatic
+    fun isLight(context: Context): Boolean = background(context) == BG_WHITE
+
+    /** A plain black or white background: no photo, no dimming. */
+    @JvmStatic
+    fun isPlain(background: String): Boolean = background == BG_BLACK || background == BG_WHITE
+
+    /** Start and the app list's own colour behind everything. */
+    @JvmStatic
+    fun surface(context: Context): Int = if (isLight(context)) Color.WHITE else Color.BLACK
+
+    /**
+     * Text and lines on Pane's own surfaces, at [alpha]: black in the light theme, white
+     * otherwise (tiles keep white text on their colour in both).
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun ink(context: Context, alpha: Int = 0xFF): Int =
+        if (isLight(context)) Color.argb(alpha, 0, 0, 0) else Color.argb(alpha, 255, 255, 255)
+
+    /** Menus, dialogs and the notification panel. */
+    @JvmStatic
+    fun menuSurface(context: Context): Int = if (isLight(context)) 0xFFF2F2F2.toInt() else 0xFF1F1F1F.toInt()
 
     private fun prefs(context: Context) = PreferenceManager.getInstance(context)
 

@@ -63,8 +63,8 @@ fun MetroPreferenceGroups() {
                 adapter = prefs.metroBackground.getAdapter(),
                 label = "background",
                 entries = listOf(
-                    ListPreferenceEntry(MetroTheme.BG_BLACK) { "black" },
-                    ListPreferenceEntry(MetroTheme.BG_WHITE) { "white (light theme)" },
+                    ListPreferenceEntry(MetroTheme.BG_BLACK) { "dark (black)" },
+                    ListPreferenceEntry(MetroTheme.BG_WHITE) { "light (white)" },
                     ListPreferenceEntry(MetroTheme.BG_WALLPAPER) { "wallpaper" },
                     ListPreferenceEntry(MetroTheme.BG_WINDOW) { "wallpaper through tiles" },
                 ),

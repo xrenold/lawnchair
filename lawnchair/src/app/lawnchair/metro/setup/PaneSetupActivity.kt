@@ -254,7 +254,7 @@ class PaneSetupActivity : Activity() {
         val options = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val bgValues = listOf(MetroTheme.BG_BLACK, MetroTheme.BG_WHITE, MetroTheme.BG_WALLPAPER, MetroTheme.BG_WINDOW)
         options.addView(
-            segmented("background", listOf("black", "white", "wallpaper", "through tiles"), bgValues.indexOf(prefs.metroBackground.get()).coerceAtLeast(0)) {
+            segmented("background", listOf("dark", "light", "wallpaper", "through tiles"), bgValues.indexOf(prefs.metroBackground.get()).coerceAtLeast(0)) {
                 prefs.metroBackground.set(bgValues[it])
             },
         )

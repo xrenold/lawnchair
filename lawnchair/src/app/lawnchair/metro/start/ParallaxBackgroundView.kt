@@ -62,13 +62,13 @@ class ParallaxBackgroundView(context: Context) : View(context) {
      * Paints the dim straight into the photo, once, instead of blending a separate full-screen
      * layer on every frame while Start scrolls.
      */
-    fun bakeDim(alpha: Float, color: Int = android.graphics.Color.BLACK) {
+    fun bakeDim(alpha: Float) {
         val bmp = bitmap ?: return
         if (dimBaked) return
         dimBaked = true
         if (alpha <= 0f) return
         val target = if (bmp.isMutable) bmp else bmp.copy(Bitmap.Config.ARGB_8888, true).also { bitmap = it }
-        Canvas(target).drawColor(androidx.core.graphics.ColorUtils.setAlphaComponent(color, (alpha * 255).toInt()))
+        Canvas(target).drawColor(android.graphics.Color.argb((alpha * 255).toInt(), 0, 0, 0))
         invalidate()
     }
 

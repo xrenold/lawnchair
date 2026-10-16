@@ -623,7 +623,7 @@ class BackgroundPreviewActivity : Activity() {
             if (windowMode) {
                 val save = canvas.save()
                 canvas.clipOutPath(hole)
-                canvas.drawColor(app.lawnchair.metro.theme.MetroTheme.surface(context))
+                canvas.drawColor(Color.BLACK)
                 canvas.restoreToCount(save)
             }
             for ((row, top) in drawn) {

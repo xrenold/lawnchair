@@ -41,7 +41,7 @@ class ArrowButton(
 
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = app.lawnchair.metro.theme.MetroTheme.ink(context)
+        color = Color.WHITE
     }
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE

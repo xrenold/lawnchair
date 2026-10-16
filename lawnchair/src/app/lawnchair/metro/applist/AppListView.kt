@@ -98,7 +98,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     /** Black behind the status bar, and behind the search bar at the bottom. */
     private val statusStrip = app.lawnchair.metro.start.StatusFade(launcher)
-    private val searchPanel = View(launcher).apply { setBackgroundColor(MetroTheme.surface(launcher)) }
+    private val searchPanel = View(launcher).apply { setBackgroundColor(Color.BLACK) }
 
     private val background = MetroTheme.background(launcher)
     /**
@@ -156,11 +156,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     init {
         // Same surface as Start: black in black and window modes (window mode cuts holes for
         // the app squares), the dimmed wallpaper itself in wallpaper mode.
-        // Start's background dim (behind) keeps the list readable. In the light theme over a
-        // dimmed see-through background, a white veil keeps the black text readable instead.
-        setBackgroundColor(
-            if (MetroTheme.isLight(launcher) && background == MetroTheme.BG_WINDOW && !windowMode) 0xCCFFFFFF.toInt() else Color.TRANSPARENT,
-        )
+        setBackgroundColor(Color.TRANSPARENT) // Start's background dim (behind) keeps the list readable
         visibility = GONE
         isClickable = true
 
@@ -241,8 +237,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private fun setupSearch() {
         search.hint = "search apps"
-        search.setHintTextColor(MetroTheme.ink(context, 0x99))
-        search.setTextColor(MetroTheme.ink(context))
+        search.setHintTextColor(0x99FFFFFF.toInt())
+        search.setTextColor(Color.WHITE)
         search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
         search.typeface = app.lawnchair.metro.theme.PaneFonts.light
         search.isSingleLine = true
@@ -250,8 +246,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         search.setPadding(dp(16f).toInt(), 0, dp(16f).toInt(), 0)
         search.background = GradientDrawable().apply {
             cornerRadius = dp(4f)
-            setColor(MetroTheme.ink(context, 0x14))
-            setStroke(dp(1f).toInt(), MetroTheme.ink(context, 0x33))
+            setColor(0x26FFFFFF)
+            setStroke(dp(1f).toInt(), 0x33FFFFFF)
         }
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -830,7 +826,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             }
             val save = c.save()
             c.clipOutPath(hole)
-            c.drawColor(MetroTheme.surface(context))
+            c.drawColor(Color.BLACK)
             c.restoreToCount(save)
         }
     }
@@ -850,7 +846,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = app.lawnchair.metro.theme.PaneFonts.light
             textSize = sp(22f)
-            color = MetroTheme.ink(context)
+            color = Color.WHITE
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -883,12 +879,12 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         private val name = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = app.lawnchair.metro.theme.PaneFonts.regular
             textSize = sp(17f)
-            color = MetroTheme.ink(context)
+            color = Color.WHITE
         }
         private val sub = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = app.lawnchair.metro.theme.PaneFonts.regular
             textSize = sp(13f)
-            color = MetroTheme.ink(context, 0x99)
+            color = 0x99FFFFFF.toInt()
         }
         private val r = RectF()
         private val iconRect = RectF()

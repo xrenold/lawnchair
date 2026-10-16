@@ -47,7 +47,7 @@ object PaneMenu {
         val list = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(context).apply {
             isVerticalScrollBarEnabled = false
-            setBackgroundColor(MetroTheme.menuSurface(context))
+            setBackgroundColor(BACKGROUND)
             addView(list)
         }
         val dm = context.resources.displayMetrics
@@ -141,9 +141,9 @@ object PaneMenu {
         setTextSize(TypedValue.COMPLEX_UNIT_SP, if (header) 14f else 19f)
         setTextColor(
             when {
-                header -> MetroTheme.ink(context, 0x99)
-                checked -> readable(context, MetroTheme.accent(context))
-                else -> MetroTheme.ink(context)
+                header -> 0x99FFFFFF.toInt()
+                checked -> readable(MetroTheme.accent(context))
+                else -> Color.WHITE
             },
         )
         val h = dp(context, 20f)
@@ -154,22 +154,16 @@ object PaneMenu {
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 
-    /**
-     * Accents kept readable on the menu: dark ones lifted toward white on the dark menu, light
-     * ones (lime, yellow) taken down toward black on the light one.
-     */
-    internal fun readable(context: Context, color: Int): Int {
+    /** Dark accents lifted toward white so checked items stay readable on the dark menu. */
+    internal fun readable(color: Int): Int {
         val lum = androidx.core.graphics.ColorUtils.calculateLuminance(color)
-        return if (MetroTheme.isLight(context)) {
-            if (lum > 0.35) androidx.core.graphics.ColorUtils.blendARGB(color, Color.BLACK, 0.4f) else color
-        } else {
-            if (lum < 0.18) androidx.core.graphics.ColorUtils.blendARGB(color, Color.WHITE, 0.45f) else color
-        }
+        return if (lum < 0.18) androidx.core.graphics.ColorUtils.blendARGB(color, Color.WHITE, 0.45f) else color
     }
 
     internal fun dp(context: Context, v: Float) =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, context.resources.displayMetrics).toInt()
 
+    internal const val BACKGROUND = 0xFF1F1F1F.toInt()
 }
 
 /** Shortcut for the usual case: [PopupMenu] as a menu builder, shown Pane's way. */

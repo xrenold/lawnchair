@@ -277,7 +277,7 @@ class TileGridView(context: Context) : ViewGroup(context) {
         val save = canvas.save()
         canvas.clipOutPath(staticHoles)
         if (!holePath.isEmpty) canvas.clipOutPath(holePath)
-        canvas.drawColor(app.lawnchair.metro.theme.MetroTheme.surface(context))
+        canvas.drawColor(Color.BLACK)
         canvas.restoreToCount(save)
     }
 

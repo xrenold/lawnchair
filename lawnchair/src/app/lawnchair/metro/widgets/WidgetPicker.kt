@@ -44,13 +44,13 @@ object WidgetPicker {
                         addView(TextView(activity).apply {
                             typeface = PaneFonts.regular
                             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                            setTextColor(app.lawnchair.metro.theme.MetroTheme.ink(activity))
+                            setTextColor(Color.WHITE)
                             text = (info.loadLabel(pm) ?: "").lowercase()
                         })
                         addView(TextView(activity).apply {
                             typeface = PaneFonts.light
                             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                            setTextColor(app.lawnchair.metro.theme.MetroTheme.ink(activity, 0xA6))
+                            setTextColor(0xA6FFFFFF.toInt())
                             text = MetroWidgets.sizeFor(activity, info).label.lowercase() + " tile or bigger"
                         })
                     },

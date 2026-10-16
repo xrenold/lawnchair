@@ -116,7 +116,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         id = View.generateViewId()
         InfoTiles.loadOverrides(launcher)
         when (background) {
-            MetroTheme.BG_BLACK -> setBackgroundColor(MetroTheme.surface(launcher))
+            MetroTheme.BG_BLACK -> setBackgroundColor(Color.BLACK)
             else -> setBackgroundColor(Color.TRANSPARENT)
         }
 
@@ -129,7 +129,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             true
         }
         // WP 8.1 parallax: our own background photo, drifting slower than the tiles.
-        if (!MetroTheme.isPlain(background) && prefs.metroBackgroundPhoto.get() > 0) {
+        if (background != MetroTheme.BG_BLACK && prefs.metroBackgroundPhoto.get() > 0) {
             val bg = ParallaxBackgroundView(launcher)
             bg.load()
             if (bg.hasImage) {
@@ -138,8 +138,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 scroller.onScrollFraction = { bg.setScrollFraction(it) }
             }
         }
-        if (!MetroTheme.isPlain(background)) {
-            if (whiteVeil) dimView.setBackgroundColor(Color.WHITE)
+        if (background != MetroTheme.BG_BLACK) {
             addView(dimView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             updateDim()
         }
@@ -638,7 +637,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     // ---- Gradient background: album colours while music plays -------------------------------
 
     private val gradientBackground: Boolean
-        get() = !MetroTheme.isPlain(background) && prefs.metroBackgroundKind.get() == "gradient" && parallax != null
+        get() = background != MetroTheme.BG_BLACK && prefs.metroBackgroundKind.get() == "gradient" && parallax != null
     private var albumKey: String? = null
     private var lastPlayingAt = 0L
     private val albumWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -689,25 +688,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         }
     }
 
-    /**
-     * Light theme over the wallpaper: tiles are solid, and the app list's black text sits on
-     * the background, so the background is lightened with a white veil instead of dimmed.
-     * See-through tiles still dim it, since their white labels sit right on it.
-     */
-    private val whiteVeil: Boolean
-        get() = MetroTheme.isLight(launcher) && background == MetroTheme.BG_WALLPAPER
-
-    private fun veilFor(lum: Float, level: Int): Float = when {
-        whiteVeil -> (BackgroundDim.dimFor(1f - lum, level) + 0.3f).coerceAtMost(0.75f)
-        // Light theme, see-through tiles: a dimmed photo looks muddy grey inside a white frame,
-        // as on Windows Phone the photo stays close to itself; label shadows carry legibility.
-        MetroTheme.isLight(launcher) -> BackgroundDim.dimFor(lum, level) * 0.3f
-        else -> BackgroundDim.dimFor(lum, level)
-    }
-
     /** Measures the background's brightness and sets the dim to match. */
     private fun updateDim() {
-        if (MetroTheme.isPlain(background)) return
+        if (background == MetroTheme.BG_BLACK) return
         val level = prefs.metroLegibility.get()
         if (level == 0) {
             dimView.alpha = 0f
@@ -718,11 +701,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             // Your own photo: the dim is painted into it once (no extra layer per frame).
             if (bg.dimBaked) return
             dimView.alpha = 0f
-            BackgroundDim.measure(launcher, bg.image) { lum -> bg.bakeDim(veilFor(lum, level), if (whiteVeil) Color.WHITE else Color.BLACK) }
+            BackgroundDim.measure(launcher, bg.image) { lum -> bg.bakeDim(BackgroundDim.dimFor(lum, level)) }
             return
         }
         BackgroundDim.measure(launcher, null) { lum ->
-            dimView.animate().alpha(veilFor(lum, level)).setDuration(250).start()
+            dimView.animate().alpha(BackgroundDim.dimFor(lum, level)).setDuration(250).start()
         }
     }
 

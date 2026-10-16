@@ -250,10 +250,7 @@ class LawnchairLauncher : QuickstepLauncher() {
         }
         val isWorkspaceDarkText = Themes.getAttrBoolean(this, R.attr.isWorkspaceDarkText)
         preferenceManager2.darkStatusBar.onEach(launchIn = lifecycleScope) { darkStatusBar ->
-            // Pane's light theme: dark status and navigation bar icons on the white Start.
-            val paneLight = MetroMode.isStartEnabled(this@LawnchairLauncher) &&
-                app.lawnchair.metro.theme.MetroTheme.isLight(this@LawnchairLauncher)
-            systemUiController?.updateUiState(UI_STATE_BASE_WINDOW, isWorkspaceDarkText || darkStatusBar || paneLight)
+            systemUiController?.updateUiState(UI_STATE_BASE_WINDOW, isWorkspaceDarkText || darkStatusBar)
         }
         preferenceManager2.backPressGestureHandler.onEach(launchIn = lifecycleScope) { handler ->
             hasBackGesture = handler !is GestureHandlerConfig.NoOp
@@ -358,7 +355,7 @@ class LawnchairLauncher : QuickstepLauncher() {
             metroShowMoreTiles.get(), metroBackground.get(), metroAppListPhoto.get(), metroColorMode.get(),
             metroClassicAccent.get(), metroIconSize.get(), metroBackgroundPhoto.get(), metroIconPack.get(),
             metroBackgroundKind.get(), metroAppCalendar.get(), metroAppPhotos.get(), metroAppWeather.get(),
-            metroAppClock.get(), metroLiveTiles.get(), metroLegibility.get(), metroLightTheme.get(),
+            metroAppClock.get(), metroLiveTiles.get(), metroLegibility.get(),
         ).joinToString("|")
     }
 
@@ -388,8 +385,6 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     private fun buildStartViews(at: Int?) {
         startBuiltWith = startSignature()
-        // Dark status bar icons on the light theme's white Start (and back to light ones).
-        systemUiController?.updateUiState(UI_STATE_BASE_WINDOW, app.lawnchair.metro.theme.MetroTheme.isLight(this))
         val layer = dragLayer
         val anchor = findViewById<View>(R.id.page_indicator) ?: hotseat
         val index = at ?: layer.indexOfChild(anchor).let { if (it < 0) 1 else it + 1 }

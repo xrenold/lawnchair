@@ -59,18 +59,11 @@ fun MetroPreferenceGroups() {
             )
         }
         ExpandAndShrink(visible = startEnabled.state.value) {
-            SwitchPreference(
-                adapter = prefs.metroLightTheme.getAdapter(),
-                label = "light theme",
-                description = "White instead of black around the tiles, in the app list and in menus",
-            )
-        }
-        ExpandAndShrink(visible = startEnabled.state.value) {
             ListPreference(
                 adapter = prefs.metroBackground.getAdapter(),
                 label = "background",
                 entries = listOf(
-                    ListPreferenceEntry(MetroTheme.BG_BLACK) { "plain" },
+                    ListPreferenceEntry(MetroTheme.BG_BLACK) { "black" },
                     ListPreferenceEntry(MetroTheme.BG_WALLPAPER) { "wallpaper" },
                     ListPreferenceEntry(MetroTheme.BG_WINDOW) { "wallpaper through tiles" },
                 ),
@@ -85,7 +78,7 @@ fun MetroPreferenceGroups() {
         }
     }
 
-    ExpandAndShrink(visible = startEnabled.state.value && !MetroTheme.isPlain(prefs.metroBackground.getAdapter().state.value)) {
+    ExpandAndShrink(visible = startEnabled.state.value && prefs.metroBackground.getAdapter().state.value != MetroTheme.BG_BLACK) {
         PreferenceGroup(heading = "background photo") {
             val context = LocalContext.current
             val photoVersion = prefs.metroBackgroundPhoto.getAdapter()

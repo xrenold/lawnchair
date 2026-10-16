@@ -26,7 +26,7 @@ object PaneDialog {
 
     /** A message with an OK button. */
     fun message(context: Context, title: String, text: String) {
-        val body = text(context, text, 15f, MetroTheme.ink(context, 0xD9))
+        val body = text(context, text, 15f, 0xD9FFFFFF.toInt())
         show(context, title, body, buttons = listOf("ok" to {}))
     }
 
@@ -70,10 +70,10 @@ object PaneDialog {
         val pad = PaneMenu.dp(context, 24f)
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(MetroTheme.menuSurface(context))
+            setBackgroundColor(PaneMenu.BACKGROUND)
             setPadding(pad, PaneMenu.dp(context, 20f), pad, PaneMenu.dp(context, 16f))
         }
-        column.addView(text(context, title.lowercase(), 26f, MetroTheme.ink(context), PaneFonts.light))
+        column.addView(text(context, title.lowercase(), 26f, Color.WHITE, PaneFonts.light))
         val maxBody = (context.resources.displayMetrics.heightPixels * 0.55f).toInt()
         val scroll = object : ScrollView(context) {
             override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -140,18 +140,18 @@ object PaneDialog {
         view.typeface = PaneFonts.regular
         // Multi-choice rows lead with a square tick box; single choices just take the accent.
         view.text = if (box) (if (on) "■  " else "□  ") + label else label
-        view.setTextColor(if (on) PaneMenu.readable(context, MetroTheme.accent(context)) else MetroTheme.ink(context))
+        view.setTextColor(if (on) PaneMenu.readable(MetroTheme.accent(context)) else Color.WHITE)
     }
 
     private fun button(context: Context, label: String, onClick: () -> Unit) = TextView(context).apply {
         text = label
         typeface = PaneFonts.semibold
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-        setTextColor(MetroTheme.ink(context))
+        setTextColor(Color.WHITE)
         gravity = Gravity.CENTER
         minWidth = PaneMenu.dp(context, 96f)
         setPadding(PaneMenu.dp(context, 18f), PaneMenu.dp(context, 9f), PaneMenu.dp(context, 18f), PaneMenu.dp(context, 9f))
-        background = GradientDrawable().apply { setStroke(PaneMenu.dp(context, 2f), MetroTheme.ink(context)) }
+        background = GradientDrawable().apply { setStroke(PaneMenu.dp(context, 2f), Color.WHITE) }
         isClickable = true
         isFocusable = true
         setOnClickListener { onClick() }

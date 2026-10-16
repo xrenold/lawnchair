@@ -318,15 +318,13 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
      * the wallpaper shows through the tile.
      */
     private fun applyShadows(onPhoto: Boolean) {
-        // The light theme barely dims the photo, so labels on it always get a soft shadow.
-        val light = MetroTheme.isLight(context)
-        if (!onPhoto || (!light && PreferenceManager.getInstance(context).metroLegibility.get() < 2)) {
+        if (!onPhoto || PreferenceManager.getInstance(context).metroLegibility.get() < 2) {
             iconPaint.clearShadowLayer()
             labelPaint.clearShadowLayer()
             countPaint.clearShadowLayer()
             return
         }
-        val c = if (light) 0x73000000 else 0x40000000
+        val c = 0x40000000
         iconPaint.setShadowLayer(dp(2f), 0f, dp(0.5f), c)
         labelPaint.setShadowLayer(dp(1.5f), 0f, dp(0.5f), c)
         countPaint.setShadowLayer(dp(1.5f), 0f, dp(0.5f), c)

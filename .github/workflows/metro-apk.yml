@@ -1,15 +1,18 @@
 name: Pane builds
 
-# Builds run only when the metro branch moves (work is done on pane-dev and merged into metro
-# when it's time for a build), or on demand from the Actions tab ("Run workflow"):
-# - "apk": the GitHub test build, published to the rolling "pane-latest" release.
-# - "play": the Google Play bundle (.aab), kept as a run artifact. It's signed with the
-#   upload key when the PANE_UPLOAD_* secrets are set (see PLAY.md).
+# Branches:
+# - pane-dev: day-to-day work. Never builds.
+# - metro: test builds. Merging into it runs "build": the GitHub APK, published to the
+#   rolling "pane-latest" release.
+# - play: releases. Merging into it runs "play": the Google Play bundle (.aab), kept as a run
+#   artifact, signed with the upload key when the PANE_UPLOAD_* secrets are set (see PLAY.md).
+# "Run workflow" in the Actions tab runs the job that belongs to the branch picked there.
 
 on:
   push:
     branches:
       - 'metro'
+      - 'play'
     paths-ignore:
       - '**.md'
   workflow_dispatch:
@@ -23,6 +26,7 @@ permissions:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/metro'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -81,6 +85,7 @@ jobs:
             --notes "Test build ${GITHUB_RUN_NUMBER} (${GITHUB_SHA::7}) from the metro branch. Install over the previous build; your layout is kept."
 
   play:
+    if: github.ref == 'refs/heads/play'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:

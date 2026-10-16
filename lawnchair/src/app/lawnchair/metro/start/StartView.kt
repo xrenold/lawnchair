@@ -116,8 +116,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         id = View.generateViewId()
         InfoTiles.loadOverrides(launcher)
         when (background) {
-            MetroTheme.BG_BLACK -> setBackgroundColor(Color.BLACK)
-            MetroTheme.BG_WHITE -> setBackgroundColor(Color.WHITE)
+            MetroTheme.BG_BLACK -> setBackgroundColor(MetroTheme.surface(launcher))
             else -> setBackgroundColor(Color.TRANSPARENT)
         }
 
@@ -140,6 +139,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             }
         }
         if (!MetroTheme.isPlain(background)) {
+            if (whiteVeil) dimView.setBackgroundColor(Color.WHITE)
             addView(dimView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             updateDim()
         }
@@ -689,6 +689,17 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         }
     }
 
+    /**
+     * Light theme over the wallpaper: tiles are solid, and the app list's black text sits on
+     * the background, so the background is lightened with a white veil instead of dimmed.
+     * See-through tiles still dim it, since their white labels sit right on it.
+     */
+    private val whiteVeil: Boolean
+        get() = MetroTheme.isLight(launcher) && background == MetroTheme.BG_WALLPAPER
+
+    private fun veilFor(lum: Float, level: Int): Float =
+        if (whiteVeil) (BackgroundDim.dimFor(1f - lum, level) + 0.3f).coerceAtMost(0.75f) else BackgroundDim.dimFor(lum, level)
+
     /** Measures the background's brightness and sets the dim to match. */
     private fun updateDim() {
         if (MetroTheme.isPlain(background)) return
@@ -702,11 +713,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             // Your own photo: the dim is painted into it once (no extra layer per frame).
             if (bg.dimBaked) return
             dimView.alpha = 0f
-            BackgroundDim.measure(launcher, bg.image) { lum -> bg.bakeDim(BackgroundDim.dimFor(lum, level)) }
+            BackgroundDim.measure(launcher, bg.image) { lum -> bg.bakeDim(veilFor(lum, level), if (whiteVeil) Color.WHITE else Color.BLACK) }
             return
         }
         BackgroundDim.measure(launcher, null) { lum ->
-            dimView.animate().alpha(BackgroundDim.dimFor(lum, level)).setDuration(250).start()
+            dimView.animate().alpha(veilFor(lum, level)).setDuration(250).start()
         }
     }
 

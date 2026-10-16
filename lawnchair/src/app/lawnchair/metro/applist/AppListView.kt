@@ -156,7 +156,11 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     init {
         // Same surface as Start: black in black and window modes (window mode cuts holes for
         // the app squares), the dimmed wallpaper itself in wallpaper mode.
-        setBackgroundColor(Color.TRANSPARENT) // Start's background dim (behind) keeps the list readable
+        // Start's background dim (behind) keeps the list readable. In the light theme over a
+        // dimmed see-through background, a white veil keeps the black text readable instead.
+        setBackgroundColor(
+            if (MetroTheme.isLight(launcher) && background == MetroTheme.BG_WINDOW && !windowMode) 0xCCFFFFFF.toInt() else Color.TRANSPARENT,
+        )
         visibility = GONE
         isClickable = true
 
@@ -826,7 +830,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             }
             val save = c.save()
             c.clipOutPath(hole)
-            c.drawColor(Color.BLACK)
+            c.drawColor(MetroTheme.surface(context))
             c.restoreToCount(save)
         }
     }

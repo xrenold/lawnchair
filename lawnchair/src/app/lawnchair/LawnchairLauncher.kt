@@ -358,7 +358,7 @@ class LawnchairLauncher : QuickstepLauncher() {
             metroShowMoreTiles.get(), metroBackground.get(), metroAppListPhoto.get(), metroColorMode.get(),
             metroClassicAccent.get(), metroIconSize.get(), metroBackgroundPhoto.get(), metroIconPack.get(),
             metroBackgroundKind.get(), metroAppCalendar.get(), metroAppPhotos.get(), metroAppWeather.get(),
-            metroAppClock.get(), metroLiveTiles.get(), metroLegibility.get(),
+            metroAppClock.get(), metroLiveTiles.get(), metroLegibility.get(), metroLightTheme.get(),
         ).joinToString("|")
     }
 

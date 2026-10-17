@@ -73,7 +73,8 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
             field = value
             if (value != null) {
                 addView(value, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-                if (width > 0) app.lawnchair.metro.widgets.MetroWidgets.updateSize(value, width, height)
+                value.onContentChanged = { updateWidgetFace() }
+                if (width > 0) layoutWidget(width, height)
                 applyWidgetColors()
             }
             loopShowsIcon = false
@@ -87,11 +88,65 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
     /** Whether the widget is the face showing now. */
     val showsWidget: Boolean
         get() {
-            widgetView ?: return false
+            val v = widgetView ?: return false
+            // Until the widget has drawn something, the tile shows its icon (not "Loading…").
+            if (!v.hasContent) return false
             if (tile.size == TileSize.SMALL || showingBack) return false
             if (tile.widgetLoop) return !loopShowsIcon && !hasBackFace
             return true
         }
+
+    /** Widget zoom: 1 = the widget gets the tile's real size; less lays it out bigger and shrinks it. */
+    private val widgetZoom: Float
+        get() = when (tile.widgetScale) {
+            0 -> if (MetroTheme.columns(context) >= 6) 0.85f else 1f
+            else -> tile.widgetScale / 100f
+        }
+
+    /** Sizes the widget for the tile: laid out at the tile's size divided by the zoom, then scaled to fit. */
+    private fun layoutWidget(w: Int, h: Int) {
+        val v = widgetView ?: return
+        val z = widgetZoom
+        val vw = (w / z).toInt()
+        val vh = (h / z).toInt()
+        val lp = v.layoutParams as LayoutParams
+        if (lp.width != vw || lp.height != vh) {
+            lp.width = vw
+            lp.height = vh
+            v.layoutParams = lp
+        }
+        v.pivotX = 0f
+        v.pivotY = 0f
+        v.scaleX = z
+        v.scaleY = z
+        app.lawnchair.metro.widgets.MetroWidgets.updateSize(v, vw, vh)
+    }
+
+    /** The app's name over the widget: bottom left, with a soft shade under it so it reads. */
+    private val labelShade = Paint()
+    private var labelShadeH = -1
+
+    private fun drawWidgetLabel(canvas: Canvas) {
+        if (!showsWidget || !tile.widgetLabel || tile.size == TileSize.SMALL || label.isEmpty()) return
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val shadeH = dp(44f) * k
+        if (labelShadeH != shadeH.toInt()) {
+            labelShadeH = shadeH.toInt()
+            labelShade.shader = android.graphics.LinearGradient(
+                0f, 0f, 0f, shadeH, 0, 0x8C000000.toInt(), android.graphics.Shader.TileMode.CLAMP,
+            )
+        }
+        val save = canvas.save()
+        canvas.translate(0f, h - shadeH)
+        canvas.drawRect(0f, 0f, w, shadeH, labelShade)
+        canvas.restoreToCount(save)
+        labelPaint.textSize = spK(13f, 11.5f)
+        labelPaint.color = Color.WHITE
+        val pad = dp(8f) * k
+        val text = TextUtils.ellipsize(label, labelPaint, w - pad * 2, TextUtils.TruncateAt.END)
+        canvas.drawText(text, 0, text.length, pad, h - pad - labelPaint.descent(), labelPaint)
+    }
 
     private fun updateWidgetFace() {
         val v = widgetView ?: return
@@ -377,6 +432,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         backLayouts = null
         if (showingBack && !hasBackFace) resetFace()
         if (!tile.widgetLoop) loopShowsIcon = false
+        if (widgetView != null && width > 0) layoutWidget(width, height)
         applyWidgetColors()
         updateWidgetFace()
         scheduleLoop()
@@ -481,6 +537,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
 
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
+        drawWidgetLabel(canvas)
         if (pressShade > 0f) {
             shadePaint.color = Color.argb((pressShade * 0.28f * 255).toInt(), 0, 0, 0)
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shadePaint)
@@ -635,7 +692,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        widgetView?.let { app.lawnchair.metro.widgets.MetroWidgets.updateSize(it, w, h) }
+        if (widgetView != null) layoutWidget(w, h)
         updateWidgetFace()
         slideshow?.onSizeChanged()
     }
@@ -1356,6 +1413,10 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
     override var dragHandler: ((MotionEvent) -> Boolean)? = null
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // The touch came to the tile itself (not the widget's buttons): its own long press
+        // applies, so the widget's timer must not fire after the finger has lifted.
+        if (!widgetStolen) removeCallbacks(widgetLongPress)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) widgetStolen = false
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             downX = event.x
             downY = event.y

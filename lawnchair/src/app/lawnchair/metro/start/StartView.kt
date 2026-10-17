@@ -937,6 +937,15 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             shows.add(GROUP_SHOWS, 0, 0, "widget").setCheckable(true).isChecked = !tile.widgetLoop
             shows.add(GROUP_SHOWS, 1, 1, "widget and icon").setCheckable(true).isChecked = tile.widgetLoop
             shows.setGroupCheckable(GROUP_SHOWS, true, true)
+            // Widget size: laid out bigger and shrunk to fit, so more of it shows on a small tile.
+            val zoom = menu.menu.addSubMenu(Menu.NONE, MENU_WIDGET_SIZE, 2, "widget size")
+            val auto = if (MetroTheme.columns(launcher) >= 6) 85 else 100
+            val current = if (tile.widgetScale == 0) auto else tile.widgetScale
+            listOf(100, 85, 70).forEachIndexed { i, pct ->
+                zoom.add(GROUP_ZOOM, pct, i, "$pct%").setCheckable(true).isChecked = pct == current
+            }
+            zoom.setGroupCheckable(GROUP_ZOOM, true, true)
+            menu.menu.add(Menu.NONE, MENU_WIDGET_NAME, 2, if (tile.widgetLabel) "hide name" else "show name")
             if (MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
                 menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")
             }
@@ -967,6 +976,14 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 item.itemId == MENU_TURN -> (view as? TileView)?.let { tv -> postDelayed({ tv.turnOver() }, 150) }
                 item.groupId == GROUP_SHOWS -> {
                     tile.widgetLoop = item.itemId == 1
+                    commit(view)
+                }
+                item.groupId == GROUP_ZOOM -> {
+                    tile.widgetScale = item.itemId
+                    commit(view)
+                }
+                item.itemId == MENU_WIDGET_NAME -> {
+                    tile.widgetLabel = !tile.widgetLabel
                     commit(view)
                 }
                 item.itemId == MENU_CHANGE_WIDGET -> {
@@ -1553,6 +1570,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_TURN = 113
         private const val MENU_TILE_SHOWS = 114
         private const val GROUP_SHOWS = 4
+        private const val GROUP_ZOOM = 5
+        private const val MENU_WIDGET_SIZE = 115
+        private const val MENU_WIDGET_NAME = 116
         private const val MENU_SHOW_APP_TILE = 111
         private const val MENU_CHANGE_WIDGET = 112
         private const val COLOR_ITEM_WIDGET_OWN = 99

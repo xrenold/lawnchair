@@ -56,6 +56,10 @@ data class MetroTile(
     var windowColor: Int = 0,
     /** App tile with a widget: the widget and the icon take turns ("widget and icon"). */
     var widgetLoop: Boolean = false,
+    /** App tile with a widget: the app's name over the widget, bottom left. */
+    var widgetLabel: Boolean = true,
+    /** Widget zoom in percent (100, 85, 70), or 0 for automatic (85 on 6 columns, else 100). */
+    var widgetScale: Int = 0,
 ) {
     /** The colour choice that applies in the current mode. */
     fun colorFor(windowMode: Boolean): Int = if (windowMode) windowColor else color
@@ -82,6 +86,8 @@ data class MetroTile(
         .put("title", title ?: "")
         .put("windowColor", windowColor)
         .put("widgetLoop", widgetLoop)
+        .put("widgetLabel", widgetLabel)
+        .put("widgetScale", widgetScale)
 
     companion object {
         /** Sentinels for [color]; real colours always have a non-zero alpha. */
@@ -104,6 +110,8 @@ data class MetroTile(
                 o.optString("title").ifEmpty { null },
                 o.optInt("windowColor", 0),
                 o.optBoolean("widgetLoop", false),
+                o.optBoolean("widgetLabel", true),
+                o.optInt("widgetScale", 0),
             )
         }
     }

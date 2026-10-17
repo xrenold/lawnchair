@@ -27,10 +27,23 @@ class PaneWidgetHostView(context: Context) : AppWidgetHostView(context) {
 
     private var hasCard = false
 
+    /** True once the widget has drawn something (until then Android shows "Loading…"). */
+    var hasContent = false
+        private set
+
+    /** Called when [hasContent] changes. */
+    var onContentChanged: (() -> Unit)? = null
+
     override fun updateAppWidget(remoteViews: RemoteViews?) {
         super.updateAppWidget(remoteViews)
+        val had = hasContent
+        hasContent = remoteViews != null
         restyle()
+        if (had != hasContent) onContentChanged?.invoke()
     }
+
+    /** Edge to edge: the widget's own padding is enough; Android's default border isn't added. */
+    override fun setPadding(left: Int, top: Int, right: Int, bottom: Int) = super.setPadding(0, 0, 0, 0)
 
     override fun onViewAdded(child: View?) {
         super.onViewAdded(child)
@@ -47,11 +60,5 @@ class PaneWidgetHostView(context: Context) : AppWidgetHostView(context) {
             // Some widgets round their inner panels too; let the tile's square edge win.
             (card as? ViewGroup)?.clipChildren = true
         }
-        // A cleared card leaves the content needing room from the tile's edge; a widget with
-        // its own card already has it.
-        val pad = if (hasCard && !ownBackground) dp(6f) else 0
-        if (paddingLeft != pad || paddingTop != pad) setPadding(pad, pad, pad, pad)
     }
-
-    private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt()
 }

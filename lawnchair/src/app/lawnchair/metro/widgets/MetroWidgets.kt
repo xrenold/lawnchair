@@ -53,18 +53,35 @@ object MetroWidgets {
         runCatching { host(context).stopListening() }
     }
 
+    /**
+     * Views made so far, one per widget. Start rebuilds its tiles often (any layout change); the
+     * same view is handed out again, already showing the widget, rather than a fresh one that
+     * starts at "Loading…".
+     */
+    private val views = HashMap<Int, PaneWidgetHostView>()
+
     fun createView(context: Context, widgetId: Int): PaneWidgetHostView? {
         val info = AppWidgetManager.getInstance(context).getAppWidgetInfo(widgetId)
         if (info == null) {
             CrashLog.event(TAG, "widget $widgetId is no longer bound")
             return null
         }
-        return runCatching { host(context).createView(context, widgetId, info) as PaneWidgetHostView }
+        views[widgetId]?.let { v ->
+            if (v.context === context) {
+                (v.parent as? android.view.ViewGroup)?.removeView(v)
+                v.scaleX = 1f
+                v.scaleY = 1f
+                v.onContentChanged = null
+                return v
+            }
+        }
+        return runCatching { (host(context).createView(context, widgetId, info) as PaneWidgetHostView).also { views[widgetId] = it } }
             .onFailure { CrashLog.event(TAG, "couldn't load ${info.provider.flattenToShortString()}", it) }
             .getOrNull()
     }
 
     fun delete(context: Context, widgetId: Int) {
+        views.remove(widgetId)
         runCatching { host(context).deleteAppWidgetId(widgetId) }
     }
 
@@ -114,10 +131,9 @@ object MetroWidgets {
 
     private fun afterBind(activity: Activity) {
         val p = pending ?: return
-        // Widgets whose setup is optional (or that can be set up later) go straight on.
-        val skipSetup = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-            p.info.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_CONFIGURATION_OPTIONAL != 0
-        if (p.info.configure != null && !skipSetup) {
+        // A widget with a setup screen always gets it: some (Maps) say setup is optional but
+        // never draw anything until it's been done.
+        if (p.info.configure != null) {
             runCatching {
                 host(activity).startAppWidgetConfigureActivityForResult(activity, p.id, 0, REQUEST_CONFIGURE, null)
             }.onFailure {

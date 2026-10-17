@@ -285,6 +285,10 @@ class PaneSetupActivity : Activity() {
     )
 
     private fun finishSetup() {
+        // First setup with usage access: Start is arranged for you as you arrive on it.
+        if (!prefs.paneOnboarded.get() && MetroUsage.hasUsageAccess(this)) {
+            app.lawnchair.metro.start.StartView.requestAutoLayout(this)
+        }
         prefs.paneOnboarded.set(true)
         finish()
     }

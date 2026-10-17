@@ -681,6 +681,7 @@ class LawnchairLauncher : QuickstepLauncher() {
         metroAwayInApp = false
         restartIfPending()
         rebuildStartIfChanged()
+        startView?.let { sv -> sv.post { sv.runRequestedAutoLayout() } }
         refreshPredictionContainersFromModel()
 
         dragLayer.viewTreeObserver.addOnDrawListener(

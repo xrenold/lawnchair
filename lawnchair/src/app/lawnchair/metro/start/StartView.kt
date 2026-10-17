@@ -1387,6 +1387,22 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private var holdCompleted = false
 
+    /**
+     * Runs auto layout if setup asked for it (see [requestAutoLayout]): once Start is laid out,
+     * with the usual undo bar.
+     */
+    fun runRequestedAutoLayout(tries: Int = 0) {
+        val p = launcher.getSharedPreferences(SETUP_PREFS, Context.MODE_PRIVATE)
+        if (!p.getBoolean(KEY_AUTO_LAYOUT, false)) return
+        if (!isAttachedToWindow || scroller.height == 0 || grid.width == 0) {
+            if (tries < 10) postDelayed({ runRequestedAutoLayout(tries + 1) }, 300)
+            return
+        }
+        p.edit().putBoolean(KEY_AUTO_LAYOUT, false).apply()
+        if (LayoutLock.isLocked(launcher) || !MetroUsage.hasUsageAccess(launcher)) return
+        postDelayed({ runAutoLayout() }, 500)
+    }
+
     private val undoBar = UndoBar(launcher)
 
     /** Rearranges Start from usage (hold the arrow). Undo restores the previous layout. */
@@ -1534,6 +1550,14 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
 
     companion object {
+        private const val SETUP_PREFS = "pane_setup"
+        private const val KEY_AUTO_LAYOUT = "autoLayoutPending"
+
+        /** Setup finished with usage access: arrange Start when it next shows. */
+        fun requestAutoLayout(context: Context) {
+            context.getSharedPreferences(SETUP_PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_AUTO_LAYOUT, true).apply()
+        }
+
         private const val MENU_RESIZE = 100
         private const val MENU_COLOR = 101
         private const val MENU_UNPIN = 102

@@ -3,6 +3,7 @@ package app.lawnchair.metro.start
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Path
 import android.util.TypedValue
 import android.view.View
@@ -232,11 +233,17 @@ class TileGridView(context: Context) : ViewGroup(context) {
     }
 
     /**
-     * Holes for tiles at rest are kept in [staticHoles] and reused frame after frame; only tiles
-     * that are moving (flipping, pressed, wiggling, dragged) are re-added each frame. The cache
-     * is rebuilt when the layout changes or a different set of tiles is moving.
+     * The black around tiles at rest is one shape, [staticHoles]: the whole grid with a hole per
+     * tile (even-odd fill; resting tiles never overlap). It's drawn as is, frame after frame, so
+     * the GPU can reuse it rather than cutting every tile out of the screen each frame. Only
+     * tiles that are moving (flipping, pressed, wiggling, dragged) are cut out per frame, and
+     * only while something moves. The shape is rebuilt when the layout changes or a different
+     * set of tiles is moving.
      */
-    private val staticHoles = Path()
+    private val staticHoles = Path().apply { fillType = Path.FillType.EVEN_ODD }
+    private val maskPaint = Paint().apply { color = Color.BLACK }
+    private var staticW = 0
+    private var staticH = 0
     private var staticValid = false
     private val staticMovers = HashSet<View>()
     private val movers = HashSet<View>()
@@ -248,8 +255,12 @@ class TileGridView(context: Context) : ViewGroup(context) {
         val all = tiles
         movers.clear()
         for (c in all) if (c.visibility == View.VISIBLE && isMoving(c)) movers += c
-        if (!staticValid || movers != staticMovers) {
+        if (!staticValid || movers != staticMovers || staticW != width || staticH != height) {
             staticHoles.rewind()
+            staticHoles.fillType = Path.FillType.EVEN_ODD
+            staticHoles.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
+            staticW = width
+            staticH = height
             for (c in all) {
                 if (c.visibility != View.VISIBLE || c in movers) continue
                 staticHoles.addRect(c.left.toFloat(), c.top.toFloat(), c.right.toFloat(), c.bottom.toFloat(), Path.Direction.CW)
@@ -274,11 +285,14 @@ class TileGridView(context: Context) : ViewGroup(context) {
             tileRectPath.offset(c.left.toFloat(), c.top.toFloat())
             holePath.addPath(tileRectPath)
         }
-        val save = canvas.save()
-        canvas.clipOutPath(staticHoles)
-        if (!holePath.isEmpty) canvas.clipOutPath(holePath)
-        canvas.drawColor(Color.BLACK)
-        canvas.restoreToCount(save)
+        if (holePath.isEmpty) {
+            canvas.drawPath(staticHoles, maskPaint)
+        } else {
+            val save = canvas.save()
+            canvas.clipOutPath(holePath)
+            canvas.drawPath(staticHoles, maskPaint)
+            canvas.restoreToCount(save)
+        }
     }
 
     /** Places every tile; returns the number of rows used. */

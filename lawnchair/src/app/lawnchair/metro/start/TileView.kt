@@ -56,7 +56,145 @@ import java.util.concurrent.Executors
  * Windows Phone look; apps without one fall back to their normal full-colour icon.
  */
 @SuppressLint("ViewConstructor")
-class TileView(context: Context, override var tile: MetroTile) : View(context), TileHolder {
+class TileView(context: Context, override var tile: MetroTile) : android.widget.FrameLayout(context), TileHolder {
+
+    // ---- The app's widget as one of the tile's faces -------------------------------------------
+
+    /**
+     * The app's widget, when this app tile shows one (StartView sets it). With "widget" the
+     * widget is the tile's front face and notifications turn it over as usual. With "widget and
+     * icon" ([MetroTile.widgetLoop]) the widget and the icon take turns; while there are unread
+     * notifications the tile turns between the icon and them, and the widget sits out.
+     */
+    var widgetView: app.lawnchair.metro.widgets.PaneWidgetHostView? = null
+        set(value) {
+            if (field === value) return
+            field?.let { removeView(it) }
+            field = value
+            if (value != null) {
+                addView(value, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+                if (width > 0) app.lawnchair.metro.widgets.MetroWidgets.updateSize(value, width, height)
+                applyWidgetColors()
+            }
+            loopShowsIcon = false
+            updateWidgetFace()
+            scheduleLoop()
+        }
+
+    /** Loop mode: true while the icon side is up (the widget is the other side). */
+    private var loopShowsIcon = false
+
+    /** Whether the widget is the face showing now. */
+    val showsWidget: Boolean
+        get() {
+            widgetView ?: return false
+            if (tile.size == TileSize.SMALL || showingBack) return false
+            if (tile.widgetLoop) return !loopShowsIcon && !hasBackFace
+            return true
+        }
+
+    private fun updateWidgetFace() {
+        val v = widgetView ?: return
+        val show = showsWidget
+        val vis = if (show) VISIBLE else INVISIBLE
+        if (v.visibility != vis) v.visibility = vis
+        invalidate()
+    }
+
+    /** The widget takes the tile's colour, like a widget tile. */
+    fun applyWidgetColors() {
+        val v = widgetView ?: return
+        v.ownBackground = false
+        val seed = if (windowMode && brandColor == 0) MetroTheme.accent(context) else drawColor()
+        app.lawnchair.metro.widgets.MetroWidgets.paletteFor(context, seed)?.let {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) v.setColorResources(it)
+        }
+    }
+
+    private fun drawColor(): Int = if (brandColor != 0) brandColor else MetroTheme.tileColor(context, tile.key, tileColorChoice)
+
+    /** When the widget was last touched: the tile holds still for a while after. */
+    private var widgetTouchedAt = 0L
+    private val loopRandom = java.util.Random()
+    private val loopRunnable = Runnable { loopTurn() }
+
+    private fun scheduleLoop() {
+        removeCallbacks(loopRunnable)
+        if (widgetView == null || !tile.widgetLoop || !isAttachedToWindow) return
+        postDelayed(loopRunnable, 8000L + loopRandom.nextInt(4000))
+    }
+
+    /** Loop mode: the widget and the icon take turns (not while notifications are up, or just after a touch). */
+    private fun loopTurn() {
+        scheduleLoop()
+        if (widgetView == null || !tile.widgetLoop || flipping || showingBack || hasBackFace) return
+        if (windowVisibility != VISIBLE || !isShown) return
+        if (System.currentTimeMillis() - widgetTouchedAt < 10_000L) return
+        turn(swap = false) {
+            loopShowsIcon = !loopShowsIcon
+            updateWidgetFace()
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        scheduleLoop()
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(loopRunnable)
+        super.onDetachedFromWindow()
+    }
+
+    // Touches on the widget go to the widget; a long press still picks the tile up.
+    private var widgetStolen = false
+    private val widgetLongPress = Runnable {
+        widgetStolen = true
+        val now = android.os.SystemClock.uptimeMillis()
+        val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+        widgetView?.dispatchTouchEvent(cancel)
+        cancel.recycle()
+        performLongClick()
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (!showsWidget) return true // the tile itself takes every touch
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                widgetStolen = false
+                widgetTouchedAt = System.currentTimeMillis()
+                downX = ev.x
+                downY = ev.y
+                downRawX = ev.rawX
+                downRawY = ev.rawY
+                postDelayed(widgetLongPress, android.view.ViewConfiguration.getLongPressTimeout().toLong())
+                if (scrollableAt(this, ev.x, ev.y)) parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_MOVE -> if (kotlin.math.hypot(ev.rawX - downRawX, ev.rawY - downRawY) >
+                android.view.ViewConfiguration.get(context).scaledTouchSlop
+            ) {
+                removeCallbacks(widgetLongPress)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(widgetLongPress)
+                widgetTouchedAt = System.currentTimeMillis()
+            }
+        }
+        return widgetStolen
+    }
+
+    private fun scrollableAt(group: android.view.ViewGroup, x: Float, y: Float): Boolean {
+        for (i in group.childCount - 1 downTo 0) {
+            val c = group.getChildAt(i)
+            if (c.visibility != VISIBLE) continue
+            val cx = x + group.scrollX - c.left
+            val cy = y + group.scrollY - c.top
+            if (cx < 0 || cy < 0 || cx >= c.width || cy >= c.height) continue
+            if (c.canScrollVertically(1) || c.canScrollVertically(-1)) return true
+            if (c is android.view.ViewGroup && scrollableAt(c, cx, cy)) return true
+        }
+        return false
+    }
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -88,6 +226,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
                 showingBack = false
                 rotationX = 0f
             }
+            updateWidgetFace()
             invalidate()
         }
 
@@ -237,11 +376,16 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         tile = newTile
         backLayouts = null
         if (showingBack && !hasBackFace) resetFace()
+        if (!tile.widgetLoop) loopShowsIcon = false
+        applyWidgetColors()
+        updateWidgetFace()
+        scheduleLoop()
         if (componentChanged) loadIconAsync()
         invalidate()
     }
 
     fun refreshColors() {
+        applyWidgetColors()
         backLayouts = null // text colours are baked into the cached layouts
         invalidate()
     }
@@ -300,7 +444,16 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     private val shadePaint = Paint()
 
     override fun onDraw(canvas: Canvas) {
-        if (showingBack && hasBackFace) drawBack(canvas) else drawFront(canvas)
+        when {
+            showingBack && hasBackFace -> drawBack(canvas)
+            // The widget draws itself (a child view) on the tile's colour.
+            showsWidget -> drawFill(canvas)
+            else -> drawFront(canvas)
+        }
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
         if (landingShade > 0f) {
             shadePaint.color = Color.argb((landingShade * 0.4f * 255).toInt(), 0, 0, 0)
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shadePaint)
@@ -451,6 +604,8 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        widgetView?.let { app.lawnchair.metro.widgets.MetroWidgets.updateSize(it, w, h) }
+        updateWidgetFace()
         slideshow?.onSizeChanged()
     }
 
@@ -1032,6 +1187,11 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         if (flipping) return
         when {
             infoKind == InfoKind.PHOTOS && slideshow != null -> turnPhoto()
+            // "Widget and icon": a turn by hand swaps them.
+            widgetView != null && tile.widgetLoop && !hasBackFace && !showingBack -> turn(swap = false) {
+                loopShowsIcon = !loopShowsIcon
+                updateWidgetFace()
+            }
             hasBackFace || showingBack -> flip()
             else -> turn(swap = false)
         }
@@ -1058,6 +1218,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
             .withEndAction {
                 if (swap) showingBack = !showingBack
                 midway?.invoke()
+                updateWidgetFace()
                 itemIndex = 0
                 slide = 1f
                 invalidate()
@@ -1143,6 +1304,7 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
         rotationX = 0f
         if (showingBack) {
             showingBack = false
+            updateWidgetFace()
             invalidate()
         }
     }
@@ -1208,6 +1370,8 @@ class TileView(context: Context, override var tile: MetroTile) : View(context), 
     // Last in the class: every property above is initialised before the icon loads, so a
     // cached icon (delivered synchronously) isn't wiped by a later property initialiser.
     init {
+        setWillNotDraw(false)
+        clipChildren = true
         isClickable = true
         isLongClickable = true
         isHapticFeedbackEnabled = true

@@ -912,10 +912,23 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                 sub.add(GROUP_SHORTCUT, i, i, sc.shortLabel ?: sc.longLabel ?: sc.id)
             }
         }
+        // The app's widgets can go on Start as tiles of their own.
+        val widgets = info.componentName?.packageName?.let { app.lawnchair.metro.widgets.MetroWidgets.providers(launcher, it) }.orEmpty()
+        if (widgets.isNotEmpty()) menu.menu.add(0, 5, 1, "pin widget to start")
         menu.menu.add(0, 2, 2, "app info")
         menu.menu.add(0, 3, 3, "uninstall")
         menu.showPane(anchor, Gravity.START) { item ->
             val pkg = info.componentName?.packageName
+            if (item.itemId == 5) {
+                app.lawnchair.metro.data.LayoutLock.guard(launcher) {
+                    val add = { w: android.appwidget.AppWidgetProviderInfo ->
+                        close(animate = true)
+                        app.lawnchair.metro.widgets.MetroWidgets.add(launcher, w)
+                    }
+                    if (widgets.size == 1) add(widgets[0]) else app.lawnchair.metro.widgets.WidgetPicker.show(launcher, widgets) { add(it) }
+                }
+                return@showPane true
+            }
             if (item.groupId == GROUP_SHORTCUT) {
                 shortcuts.getOrNull(item.itemId)?.let {
                     app.lawnchair.metro.data.LayoutLock.guard(launcher) {

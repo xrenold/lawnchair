@@ -42,7 +42,10 @@ data class MetroTile(
     val kind: Kind = Kind.APP,
     /** App shortcut id (kind SHORTCUT). */
     val shortcutId: String? = null,
-    /** Bound widget id (kind WIDGET). */
+    /**
+     * Bound widget id: the widget itself (kind WIDGET), or the widget an app tile shows as one of
+     * its faces (kind APP; 0 = none).
+     */
     val widgetId: Int = 0,
     /** Label for shortcut tiles. */
     val title: String? = null,
@@ -51,6 +54,8 @@ data class MetroTile(
      * from [color], so picks made in one mode never carry over into the other.
      */
     var windowColor: Int = 0,
+    /** App tile with a widget: the widget and the icon take turns ("widget and icon"). */
+    var widgetLoop: Boolean = false,
 ) {
     /** The colour choice that applies in the current mode. */
     fun colorFor(windowMode: Boolean): Int = if (windowMode) windowColor else color
@@ -76,6 +81,7 @@ data class MetroTile(
         .put("widgetId", widgetId)
         .put("title", title ?: "")
         .put("windowColor", windowColor)
+        .put("widgetLoop", widgetLoop)
 
     companion object {
         /** Sentinels for [color]; real colours always have a non-zero alpha. */
@@ -97,6 +103,7 @@ data class MetroTile(
                 o.optInt("widgetId", 0),
                 o.optString("title").ifEmpty { null },
                 o.optInt("windowColor", 0),
+                o.optBoolean("widgetLoop", false),
             )
         }
     }
@@ -196,47 +203,23 @@ class MetroTileStore(private val context: Context) {
     }
 
     /**
-     * Turns tile [tileId] into a widget, keeping its place, colour and lock (and its size, unless
-     * it's too small for a widget).
+     * App tile [tileId] shows widget [widgetId] (replacing any it showed before, whose id is
+     * returned so it can be let go). It keeps its place, colour and lock, and its size unless
+     * it's too small for a widget.
      */
-    fun replaceWithWidget(tileId: Long, provider: ComponentName, widgetId: Int, fallbackSize: TileSize) {
+    fun setTileWidget(tileId: Long, widgetId: Int, fallbackSize: TileSize): Int {
         val tiles = load()
         val i = tiles.indexOfFirst { it.id == tileId }
-        if (i < 0) {
-            addWidget(provider, widgetId, fallbackSize)
-            return
-        }
+        if (i < 0) return 0
         val old = tiles[i]
         tiles[i] = old.copy(
-            component = provider,
-            size = if (old.size == TileSize.SMALL) fallbackSize else old.size,
-            kind = MetroTile.Kind.WIDGET,
+            size = if (widgetId != 0 && old.size == TileSize.SMALL) fallbackSize else old.size,
             widgetId = widgetId,
-            shortcutId = null,
-            title = null,
+            widgetLoop = if (widgetId == 0) false else old.widgetLoop,
         )
         save(tiles)
         listeners.toList().forEach(Runnable::run)
-    }
-
-    /** Turns widget tile [tileId] back into [app]'s ordinary tile, in the same place. */
-    fun replaceWithApp(tileId: Long, app: ComponentName) {
-        val tiles = load()
-        val i = tiles.indexOfFirst { it.id == tileId }
-        if (i < 0) return
-        val old = tiles[i]
-        tiles[i] = old.copy(
-            component = app,
-            kind = MetroTile.Kind.APP,
-            widgetId = 0,
-            color = if (old.color == MetroTile.COLOR_WIDGET) 0 else old.color,
-            windowColor = if (old.windowColor == MetroTile.COLOR_WIDGET) 0 else old.windowColor,
-        )
-        // An app can only have one tile: drop a second one if the app was also pinned.
-        val dupe = tiles.indexOfFirst { it.id != tileId && it.isApp && it.component == app }
-        if (dupe >= 0) tiles.removeAt(dupe)
-        save(tiles)
-        listeners.toList().forEach(Runnable::run)
+        return old.widgetId
     }
 
     private fun isLaunchable(cn: ComponentName): Boolean {

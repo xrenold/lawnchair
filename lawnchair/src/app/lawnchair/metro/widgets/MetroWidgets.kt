@@ -86,9 +86,11 @@ object MetroWidgets {
 
     /**
      * Starts adding [info]: bind (asking permission if needed), configure, then put it on Start,
-     * in place of tile [replaceTileId] when given.
+     * shown on app tile [forTileId] when given (as one of its faces), else as a widget tile of its
+     * own at the end of Start.
      */
-    fun add(activity: Activity, info: AppWidgetProviderInfo, replaceTileId: Long? = null) {
+    fun add(activity: Activity, info: AppWidgetProviderInfo, forTileId: Long? = null) {
+        val replaceTileId = forTileId
         val id = host(activity).allocateAppWidgetId()
         pending = Pending(id, info, replaceTileId)
         CrashLog.event(TAG, "adding ${info.provider.flattenToShortString()} as $id")
@@ -132,7 +134,8 @@ object MetroWidgets {
         pending = null
         val store = MetroTileStore.get(context)
         if (p.replaceTileId != null) {
-            store.replaceWithWidget(p.replaceTileId, p.info.provider, p.id, sizeFor(context, p.info))
+            val old = store.setTileWidget(p.replaceTileId, p.id, sizeFor(context, p.info))
+            if (old != 0 && old != p.id) delete(context, old)
         } else {
             store.addWidget(p.info.provider, p.id, sizeFor(context, p.info))
         }

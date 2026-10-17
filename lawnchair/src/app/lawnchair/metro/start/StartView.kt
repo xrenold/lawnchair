@@ -401,9 +401,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         updateAlbumGradient(data)
         val visible = Rect()
         for (i in 0 until grid.childCount) {
-            (grid.getChildAt(i) as? WidgetTileView)?.let { wv ->
-                wv.count = data[wv.tile.component.packageName]?.count ?: 0
-            }
             val tv = grid.getChildAt(i) as? TileView ?: continue
             if (!tv.tile.isApp) continue
             val pkg = tv.tile.component.packageName
@@ -807,6 +804,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     private fun createAppTile(tile: MetroTile) = TileView(launcher, tile).apply {
         windowMode = this@StartView.windowMode
+        // An app tile showing its widget (see TileView.widgetView).
+        if (tile.isApp && tile.widgetId != 0) widgetView = MetroWidgets.createView(launcher, tile.widgetId)
         if (tile.isApp) InfoTiles.kindOf(tile.component.packageName)?.let { infoKind = it }
         infoChanged()
         onIconLoaded = { scheduleBrands() }
@@ -835,9 +834,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val widgets = MetroWidgets.providers(launcher, tile.component.packageName)
         when {
             widgets.isEmpty() -> Toast.makeText(launcher, "This app has no widgets", Toast.LENGTH_SHORT).show()
-            widgets.size == 1 -> MetroWidgets.add(launcher, widgets[0], replaceTileId = tile.id)
+            widgets.size == 1 -> MetroWidgets.add(launcher, widgets[0], forTileId = tile.id)
             else -> app.lawnchair.metro.widgets.WidgetPicker.show(launcher, widgets) { info ->
-                MetroWidgets.add(launcher, info, replaceTileId = tile.id)
+                MetroWidgets.add(launcher, info, forTileId = tile.id)
             }
         }
     }
@@ -926,16 +925,24 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             }
             menu.menu.add(Menu.NONE, MENU_SLIDESHOW, 2, if (prefs.metroPhotoSlideshow.get()) "turn slideshow off" else "turn slideshow on")
         }
-        if (!locked && tile.isApp && MetroWidgets.hasWidgets(launcher, tile.component.packageName)) {
+        if (!locked && tile.isApp && tile.widgetId == 0 && MetroWidgets.hasWidgets(launcher, tile.component.packageName)) {
             menu.menu.add(Menu.NONE, MENU_SHOW_WIDGET, 2, "show widget")
         }
-        if (!locked && isWidget) {
-            if (MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
-                menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")
+        if (tile.isApp && tile.widgetId != 0) {
+            // What the tile turns between: the widget alone (and notifications), or widget and icon.
+            val shows = menu.menu.addSubMenu(Menu.NONE, MENU_TILE_SHOWS, 2, "tile shows")
+            shows.add(GROUP_SHOWS, 0, 0, "widget").setCheckable(true).isChecked = !tile.widgetLoop
+            shows.add(GROUP_SHOWS, 1, 1, "widget and icon").setCheckable(true).isChecked = tile.widgetLoop
+            shows.setGroupCheckable(GROUP_SHOWS, true, true)
+            if (!locked) {
+                if (MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
+                    menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")
+                }
+                menu.menu.add(Menu.NONE, MENU_SHOW_APP_TILE, 2, "hide widget")
             }
-            if (MetroWidgets.appFor(launcher, tile.component) != null) {
-                menu.menu.add(Menu.NONE, MENU_SHOW_APP_TILE, 2, "show app tile")
-            }
+        }
+        if (!locked && isWidget && MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
+            menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")
         }
         if (!locked) {
             menu.menu.add(Menu.NONE, MENU_LOCK, 2, if (tile.locked) "unlock tile" else "lock tile (auto layout keeps it)")
@@ -957,27 +964,29 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 }
                 item.itemId == MENU_SHOW_WIDGET -> pickWidgetFor(tile)
                 item.itemId == MENU_TURN -> (view as? TileView)?.let { tv -> postDelayed({ tv.turnOver() }, 150) }
+                item.groupId == GROUP_SHOWS -> {
+                    tile.widgetLoop = item.itemId == 1
+                    commit(view)
+                }
                 item.itemId == MENU_CHANGE_WIDGET -> {
                     val widgets = MetroWidgets.providers(launcher, tile.component.packageName)
                     app.lawnchair.metro.widgets.WidgetPicker.show(launcher, widgets) { info ->
-                        val oldId = tile.widgetId
-                        MetroWidgets.add(launcher, info, replaceTileId = tile.id)
-                        // The old widget goes once the new one is in (the store change rebuilds Start).
-                        store.addListener(object : Runnable {
-                            override fun run() {
-                                store.removeListener(this)
-                                if (store.load().none { it.widgetId == oldId }) MetroWidgets.delete(launcher, oldId)
-                            }
-                        })
+                        if (tile.isApp) {
+                            // The old widget is let go once the new one is on the tile.
+                            MetroWidgets.add(launcher, info, forTileId = tile.id)
+                        } else {
+                            // A widget tile of its own: the new widget takes its place.
+                            val oldId = tile.widgetId
+                            tiles.removeAll { it.id == tile.id }
+                            store.save(tiles)
+                            MetroWidgets.delete(launcher, oldId)
+                            MetroWidgets.add(launcher, info)
+                        }
                     }
                 }
                 item.itemId == MENU_SHOW_APP_TILE -> {
-                    val app = MetroWidgets.appFor(launcher, tile.component)
-                    if (app != null) {
-                        val oldId = tile.widgetId
-                        store.replaceWithApp(tile.id, app)
-                        MetroWidgets.delete(launcher, oldId)
-                    }
+                    val oldId = store.setTileWidget(tile.id, 0, tile.size)
+                    if (oldId != 0) MetroWidgets.delete(launcher, oldId)
                 }
                 item.itemId == MENU_PICK_PHOTOS -> app.lawnchair.metro.info.PhotoPicks.open(launcher, replace = true)
                 item.itemId == MENU_ADD_PHOTOS -> app.lawnchair.metro.info.PhotoPicks.open(launcher, replace = false)
@@ -1007,7 +1016,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     tiles.removeAll { it.id == tile.id }
                     store.save(tiles)
                     if (tile.isApp) MetroUsage.recordUnpinned(launcher, tile.component.packageName)
-                    if (isWidget) MetroWidgets.delete(launcher, tile.widgetId)
+                    if (tile.widgetId != 0) MetroWidgets.delete(launcher, tile.widgetId)
                     grid.setOrder(grid.tiles.filter { it !== view })
                     grid.removeView(view)
                     grid.animateReflow()
@@ -1541,6 +1550,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_ADD_PHOTOS = 109
         private const val MENU_SHOW_WIDGET = 110
         private const val MENU_TURN = 113
+        private const val MENU_TILE_SHOWS = 114
+        private const val GROUP_SHOWS = 4
         private const val MENU_SHOW_APP_TILE = 111
         private const val MENU_CHANGE_WIDGET = 112
         private const val COLOR_ITEM_WIDGET_OWN = 99

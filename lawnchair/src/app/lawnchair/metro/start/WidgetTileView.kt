@@ -21,7 +21,8 @@ import kotlin.math.hypot
  * An app's widget shown as its tile. The tile keeps its size, place and colour; the widget draws
  * its content on the tile's colour, in colours made from it. Buttons and lists in the widget
  * work as usual; tapping anywhere else opens the app. Long-press anywhere to pick it up, like
- * any other tile. The app's unread count shows in the corner.
+ * any other tile. A widget tile of its own shows no notifications (an app tile showing its
+ * widget does: see TileView.widgetView).
  */
 @SuppressLint("ViewConstructor")
 class WidgetTileView(

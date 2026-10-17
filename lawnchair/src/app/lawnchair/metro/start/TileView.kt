@@ -103,23 +103,35 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
             else -> tile.widgetScale / 100f
         }
 
-    /** Sizes the widget for the tile: laid out at the tile's size divided by the zoom, then scaled to fit. */
+    /**
+     * Sizes the widget for the tile: told it has the tile's size divided by the zoom, then scaled
+     * to fit. The widget is measured and placed at that size here (see [onMeasure] / [onLayout])
+     * rather than through its layout params, which can't change mid-layout.
+     */
     private fun layoutWidget(w: Int, h: Int) {
         val v = widgetView ?: return
         val z = widgetZoom
-        val vw = (w / z).toInt()
-        val vh = (h / z).toInt()
-        val lp = v.layoutParams as LayoutParams
-        if (lp.width != vw || lp.height != vh) {
-            lp.width = vw
-            lp.height = vh
-            v.layoutParams = lp
-        }
         v.pivotX = 0f
         v.pivotY = 0f
         v.scaleX = z
         v.scaleY = z
-        app.lawnchair.metro.widgets.MetroWidgets.updateSize(v, vw, vh)
+        app.lawnchair.metro.widgets.MetroWidgets.updateSize(v, (w / z).toInt(), (h / z).toInt())
+        requestLayout()
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        val v = widgetView ?: return
+        val z = widgetZoom
+        v.measure(
+            MeasureSpec.makeMeasureSpec((measuredWidth / z).toInt(), MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec((measuredHeight / z).toInt(), MeasureSpec.EXACTLY),
+        )
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        widgetView?.let { it.layout(0, 0, it.measuredWidth, it.measuredHeight) }
     }
 
     /** The app's name over the widget: bottom left, with a soft shade under it so it reads. */

@@ -532,6 +532,8 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
     override var lifted = false
         set(value) {
             field = value
+            // Picked up (or its menu opened): the press is over, whatever happens to the touch.
+            if (value && pressShade > 0f) animatePressShade(0f, 120)
             invalidate()
         }
     private val liftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1492,6 +1494,10 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
             downY = event.y
             downRawX = event.rawX
             downRawY = event.rawY
+        }
+        // The press always ends with the touch, even when a drag or the menu took it over.
+        if ((event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) && pressShade > 0f) {
+            animatePressShade(0f, 160)
         }
         dragHandler?.let { if (it(event)) return true }
         // Media buttons on the back of a music tile take the touch instead of opening the app.

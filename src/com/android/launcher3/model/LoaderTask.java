@@ -336,6 +336,18 @@ public class LoaderTask implements Runnable {
         logASplit("step 2 loading AllApps complete");
         verifyNotStopped();
 
+        // Pane: with Start on, the hidden home screen's long-press shortcuts and widget list are
+        // never shown (Pane asks Android for shortcuts itself and hosts its own widgets), so
+        // they aren't loaded: that's memory and start-up time for nothing.
+        if (app.lawnchair.metro.MetroMode.isStartEnabled(mContext)) {
+            loadFolderNames();
+            verifyNotStopped();
+            updateHandler.finish();
+            logASplit("finish icon update (Pane: shortcuts and widgets skipped)");
+            mModelDelegate.modelLoadComplete();
+            return;
+        }
+
         // third step
         List<ShortcutInfo> allDeepShortcuts = loadDeepShortcuts();
         logASplit("loadDeepShortcuts finished");
@@ -776,8 +788,10 @@ public class LoaderTask implements Runnable {
                         + ", isArchived: " + activityInfo.getApplicationInfo().isArchived);
             }
         }
+        // Pane: with Start on, the hidden app drawer's icons are never seen (Pane draws its
+        // own), so only the small versions are kept in memory, not a full icon per app.
         return new IconRequestInfo<>(appInfo, activityInfo,
-                DEFAULT_LOOKUP_FLAG.withUseLowRes(false));
+                DEFAULT_LOOKUP_FLAG.withUseLowRes(app.lawnchair.metro.MetroMode.isStartEnabled(mContext)));
     }
 
     private List<ShortcutInfo> loadDeepShortcuts() {

@@ -96,6 +96,7 @@ class WidgetTileView(
             addView(hostView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         }
         contentDescription = hostView?.appWidgetInfo?.loadLabel(context.packageManager) ?: "Widget"
+        hostView?.onContentChanged = { invalidate() }
         refreshColors()
     }
 
@@ -196,8 +197,21 @@ class WidgetTileView(
         return true
     }
 
+    private val notePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = PaneFonts.regular
+        textAlign = Paint.Align.CENTER
+    }
+
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
+        if (hostView == null || !hostView.hasContent) {
+            // Nothing from the widget yet (or it couldn't be shown): say what it is, quietly.
+            notePaint.textSize = sp(14f)
+            notePaint.color = if (isWindow || keepsOwnLook) 0xCCFFFFFF.toInt() else MetroTheme.onTileColor(fillColor())
+            val name = contentDescription?.toString()?.lowercase() ?: "widget"
+            val text = android.text.TextUtils.ellipsize(name, android.text.TextPaint(notePaint), width - dp(24f), android.text.TextUtils.TruncateAt.END)
+            canvas.drawText(text, 0, text.length, width / 2f, height / 2f - (notePaint.ascent() + notePaint.descent()) / 2f, notePaint)
+        }
         if (count > 0 && !lifted) {
             // The unread count, top right, like the number on an app tile.
             val text = if (count > 99) "99+" else count.toString()

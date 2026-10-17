@@ -67,7 +67,7 @@ object MetroWidgets {
             return null
         }
         views[widgetId]?.let { v ->
-            if (v.context === context) {
+            if (v.owner === context) {
                 (v.parent as? android.view.ViewGroup)?.removeView(v)
                 v.scaleX = 1f
                 v.scaleY = 1f
@@ -75,7 +75,15 @@ object MetroWidgets {
                 return v
             }
         }
-        return runCatching { (host(context).createView(context, widgetId, info) as PaneWidgetHostView).also { views[widgetId] = it } }
+        // Widgets are inflated with a plain context: the launcher's own one swaps in its own text
+        // views and fonts, which some widgets can't be built with ("Can't load widget").
+        val plain = android.view.ContextThemeWrapper(context.applicationContext, android.R.style.Theme_DeviceDefault)
+        return runCatching {
+            (host(context).createView(plain, widgetId, info) as PaneWidgetHostView).also {
+                it.owner = context
+                views[widgetId] = it
+            }
+        }
             .onFailure { CrashLog.event(TAG, "couldn't load ${info.provider.flattenToShortString()}", it) }
             .getOrNull()
     }

@@ -34,12 +34,34 @@ class PaneWidgetHostView(context: Context) : AppWidgetHostView(context) {
     /** Called when [hasContent] changes. */
     var onContentChanged: (() -> Unit)? = null
 
+    /** The screen the view was made for (it's inflated with a plain context; see MetroWidgets). */
+    var owner: Context? = null
+
+    /** Set when Android couldn't build the widget's content ("Can't load widget"). */
+    private var failed = false
+
     override fun updateAppWidget(remoteViews: RemoteViews?) {
+        failed = false
         super.updateAppWidget(remoteViews)
         val had = hasContent
-        hasContent = remoteViews != null
+        hasContent = remoteViews != null && !failed
+        if (failed && remoteViews != null) {
+            // Find out why, for the crash report: build it once more and keep the error.
+            val error = runCatching { remoteViews.apply(context, this) }.exceptionOrNull()
+            app.lawnchair.metro.CrashLog.event(
+                "widget",
+                "couldn't show ${appWidgetInfo?.provider?.flattenToShortString()}",
+                error,
+            )
+        }
         restyle()
         if (had != hasContent) onContentChanged?.invoke()
+    }
+
+    /** Android's "Can't load widget": the tile shows the app's icon instead (see TileView). */
+    override fun getErrorView(): View {
+        failed = true
+        return View(context)
     }
 
     /** Edge to edge: the widget's own padding is enough; Android's default border isn't added. */

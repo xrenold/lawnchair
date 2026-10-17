@@ -92,7 +92,107 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private var live: Map<String, LiveInfo> = emptyMap()
 
     private val search = EditText(launcher)
-    private val list = RecyclerView(launcher)
+    /**
+     * The list. Its section's letter header sticks to the top (see [StickyHeader]); rows scroll
+     * under it and are hidden there, so the background shows around the sticky letter.
+     */
+    private val list = object : RecyclerView(launcher) {
+        override fun draw(c: Canvas) {
+            measureSticky()
+            super.draw(c)
+        }
+
+        override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
+            if (stickyLetter == null) return super.drawChild(canvas, child, drawingTime)
+            val save = canvas.save()
+            canvas.clipRect(0f, stickyBottom, width.toFloat(), 100_000f)
+            val r = super.drawChild(canvas, child, drawingTime)
+            canvas.restoreToCount(save)
+            return r
+        }
+    }
+
+    // ---- Sticky letter header -------------------------------------------------------------
+
+    /** The letter shown stuck to the top, or null (searching, or no headers yet). */
+    private var stickyLetter: Char? = null
+    /** Where the sticky header sits this frame (list coordinates); rows are hidden above [stickyBottom]. */
+    private var stickyTop = 0f
+    private var stickyBottom = 0f
+    private val headerHeight = dp(58f)
+    private val stickyView by lazy { HeaderView(launcher) }
+    /** Section letter of each row (null for search results), parallel to [rows]. */
+    private var rowLetters: List<Char?> = emptyList()
+
+    /** Works out the sticky header for this frame: the section at the top, pushed up by the next one. */
+    private fun measureSticky() {
+        val top = list.paddingTop.toFloat()
+        if (sectionPositions.isEmpty() || list.childCount == 0) {
+            stickyLetter = null
+            return
+        }
+        var letter: Char? = null
+        var pushUp = Float.MAX_VALUE
+        for (i in 0 until list.childCount) {
+            val child = list.getChildAt(i)
+            val pos = list.getChildAdapterPosition(child)
+            if (pos < 0) continue
+            val y = child.top + child.translationY
+            if (y <= top + 1f && y + child.height > top) letter = rowLetters.getOrNull(pos)
+            if (child is HeaderView && y > top + 1f) pushUp = minOf(pushUp, y)
+        }
+        if (letter == null) {
+            // Nothing straddles the top edge (a gap): use the first row below it.
+            val first = layoutManager.findFirstVisibleItemPosition()
+            letter = rowLetters.getOrNull(first)
+        }
+        stickyLetter = letter
+        stickyTop = if (pushUp < top + headerHeight) pushUp - headerHeight else top
+        stickyBottom = stickyTop + headerHeight
+    }
+
+    /** Draws the sticky header over the list; it has no background, so the wallpaper shows. */
+    private inner class StickyHeader : RecyclerView.ItemDecoration() {
+        override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+            val letter = stickyLetter ?: return
+            val v = stickyView
+            val w = parent.width
+            if (v.width != w || v.height != headerHeight.toInt()) {
+                v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(headerHeight.toInt(), View.MeasureSpec.EXACTLY))
+                v.layout(0, 0, w, headerHeight.toInt())
+            }
+            v.letter = letter
+            v.alpha = 1f
+            val save = c.save()
+            c.translate(0f, stickyTop)
+            v.draw(c)
+            c.restoreToCount(save)
+        }
+    }
+
+    /** True when the touch went down on the sticky header, where the rows underneath are hidden. */
+    private fun touchedSticky(): Boolean = stickyLetter != null && lastDownY < stickyBottom
+    private var lastDownY = 0f
+
+    // ---- Greying while scrubbing ------------------------------------------------------------
+
+    /** While a finger is on the letters, the section being picked; the other apps grey out. */
+    private var focusLetter: Char? = null
+
+    private fun setFocusLetter(letter: Char?) {
+        if (focusLetter == letter) return
+        focusLetter = letter
+        for (i in 0 until list.childCount) {
+            val child = list.getChildAt(i)
+            val target = alphaFor(list.getChildAdapterPosition(child))
+            if (letter == null) child.animate().alpha(target).setDuration(150).start() else child.alpha = target
+        }
+    }
+
+    private fun alphaFor(pos: Int): Float {
+        val f = focusLetter ?: return 1f
+        return if (pos >= 0 && rowLetters.getOrNull(pos) == f) 1f else 0.25f
+    }
     private val scrubber = AlphabetScrubber(launcher) { letter, y -> jumpTo(letter, y) }
     private val sectionPositions = HashMap<Char, Int>()
 
@@ -167,9 +267,12 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         list.isVerticalScrollBarEnabled = false
         list.itemAnimator = null
         list.addItemDecoration(WindowMask())
+        list.addItemDecoration(StickyHeader())
         // Scrolling the results, or tapping empty space, puts the keyboard away.
         // A finger on the letters stops a moving list before it jumps.
         scrubber.onTouchStart = { list.stopScroll() }
+        // Letting go of the letters brings the other apps back.
+        scrubber.onTouchEnd = { setFocusLetter(null) }
         list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) = updateScrolledLetter()
 
@@ -188,6 +291,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                     MotionEvent.ACTION_DOWN -> {
                         downX = e.x
                         downY = e.y
+                        lastDownY = e.y
                     }
                     MotionEvent.ACTION_UP -> if (search.hasFocus() && abs(e.x - downX) < dp(10f) && abs(e.y - downY) < dp(10f) &&
                         rv.findChildViewUnder(e.x, e.y) == null
@@ -407,6 +511,13 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             }
             out
         }
+        rowLetters = if (query.isNotEmpty()) {
+            emptyList()
+        } else {
+            var cur: Char? = null
+            rows.map { r -> (r as? Row.Header)?.letter?.also { cur = it } ?: cur }
+        }
+        if (query.isNotEmpty()) stickyLetter = null
         layoutManager.stackFromEnd = query.isNotEmpty()
         scrubber.available = sectionPositions.keys.toSet()
         updateScrubberVisibility()
@@ -414,28 +525,32 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         if (query.isNotEmpty()) list.scrollToPosition((rows.size - 1).coerceAtLeast(0))
     }
 
+    /** Where a jumped-to letter's heading lands: a third of the way down the screen. */
+    private val jumpLine: Float get() = height / 3f
+
     /**
-     * Jumps to [letter], with its heading at the middle of the screen, so the apps land within
-     * thumb reach rather than at the top. Near the ends the list can't move that far and simply
-     * stops at the edge.
+     * Jumps to [letter], with its heading a third of the way down the screen, so the apps land
+     * within thumb reach rather than at the top. Near the ends the list can't move that far and
+     * simply stops at the edge. While the finger stays on the letters, the other apps grey out.
      */
     @Suppress("UNUSED_PARAMETER")
     private fun jumpTo(letter: Char, fingerY: Float) {
         val pos = sectionPositions[letter] ?: return
         val headerHalf = dp(20f)
-        val offset = (height / 2f - list.top - list.paddingTop - headerHalf).toInt().coerceAtLeast(0)
+        val offset = (jumpLine - list.top - list.paddingTop - headerHalf).toInt().coerceAtLeast(0)
         layoutManager.scrollToPositionWithOffset(pos, offset)
         scrubber.scrolledTo = letter
+        setFocusLetter(letter)
     }
 
-    /** Lights the letter of the section at the middle of the screen as the list scrolls. */
+    /** Lights the letter of the section at the jump line as the list scrolls. */
     private fun updateScrolledLetter() {
         if (sectionPositions.isEmpty()) return
         val first = layoutManager.findFirstVisibleItemPosition()
         if (first < 0) return
         var i = first.coerceAtMost(rows.size - 1)
-        // The row at the middle of the screen, where a jump puts its letter.
-        list.findChildViewUnder(list.width / 2f, height / 2f - list.top)?.let { v ->
+        // The row at the jump line, where a jump puts its letter.
+        list.findChildViewUnder(list.width / 2f, jumpLine - list.top)?.let { v ->
             list.getChildAdapterPosition(v).takeIf { it >= 0 }?.let { i = it }
         }
         while (i >= 0 && rows[i] !is Row.Header) i--
@@ -787,12 +902,16 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            holder.itemView.animate().cancel()
+            holder.itemView.alpha = alphaFor(position)
             when (val row = rows[position]) {
                 is Row.Header -> (holder.itemView as HeaderView).letter = row.letter
                 is Row.App -> (holder.itemView as AppRowView).apply {
                     bind(row.info, snippetFor(row.info.componentName?.packageName))
-                    setOnClickListener { launch(row.info, this) }
+                    // Rows under the sticky letter are hidden: a tap there isn't on them.
+                    setOnClickListener { if (!touchedSticky()) launch(row.info, this) }
                     setOnLongClickListener {
+                        if (touchedSticky()) return@setOnLongClickListener true
                         it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                         showAppMenu(row.info, this)
                         true
@@ -810,6 +929,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private inner class WindowMask : RecyclerView.ItemDecoration() {
         private val hole = android.graphics.Path()
         private val tmp = android.graphics.Path()
+        private val visible = android.graphics.Path()
         private val rect = RectF()
 
         override fun onDraw(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
@@ -823,6 +943,12 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                 if (!child.matrix.isIdentity) tmp.transform(child.matrix)
                 tmp.offset(child.left.toFloat(), child.top.toFloat())
                 hole.addPath(tmp)
+            }
+            // Rows under the sticky letter are hidden, so their windows are closed too.
+            if (stickyLetter != null) {
+                visible.rewind()
+                visible.addRect(0f, stickyBottom, parent.width.toFloat(), 100_000f, android.graphics.Path.Direction.CW)
+                hole.op(visible, android.graphics.Path.Op.INTERSECT)
             }
             val save = c.save()
             c.clipOutPath(hole)

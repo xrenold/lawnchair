@@ -33,6 +33,9 @@ class AlphabetScrubber(context: Context, private val onLetter: (letter: Char, fi
     /** Called as a finger lands on the letters (the list stops moving first). */
     var onTouchStart: (() -> Unit)? = null
 
+    /** Called when the finger leaves the letters. */
+    var onTouchEnd: (() -> Unit)? = null
+
     /** The section the list is showing while you scroll; lit in the accent colour. */
     var scrolledTo: Char? = null
         set(value) {
@@ -139,6 +142,7 @@ class AlphabetScrubber(context: Context, private val onLetter: (letter: Char, fi
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 animateActive(0f)
                 current = null
+                onTouchEnd?.invoke()
             }
         }
         return true

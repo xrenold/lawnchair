@@ -1343,6 +1343,19 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         }
     }
 
+    /**
+     * Double tap turns the tile over, but only while it shows its icon and has something on the
+     * other side (notifications, music, an event, a photo, or its widget in "widget and icon").
+     * Other tiles open on a single tap without waiting.
+     */
+    val turnsOnDoubleTap: Boolean
+        get() {
+            if (showingBack || showsWidget || flipping) return false
+            if (infoKind == InfoKind.PHOTOS && slideshow != null) return true
+            if (widgetView != null && tile.widgetLoop) return true
+            return hasBackFace
+        }
+
     /** Turns the Photos tile over; what the other side shows is decided by its slideshow. */
     fun turnPhoto() {
         val show = slideshow ?: return

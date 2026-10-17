@@ -778,6 +778,43 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         Turnstile.into(swingViews()) { grid.invalidate() }
     }
 
+    // ---- Double tap turns a tile over ----------------------------------------------------------
+
+    private var pendingTap: TileView? = null
+    private val pendingTapRun = Runnable {
+        val tv = pendingTap ?: return@Runnable
+        pendingTap = null
+        openTile(tv)
+    }
+
+    /**
+     * A tap on a tile. Tiles that turn on a double tap (see [TileView.turnsOnDoubleTap]) wait a
+     * moment for a second tap: two taps turn the tile over, one opens the app. Every other tile
+     * opens straight away.
+     */
+    private fun onTileTap(tv: TileView) {
+        if (pendingTap === tv) {
+            removeCallbacks(pendingTapRun)
+            pendingTap = null
+            tv.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            tv.turnOver()
+            return
+        }
+        // A tap on another tile while one waits: the waiting one opens now.
+        pendingTap?.let {
+            removeCallbacks(pendingTapRun)
+            pendingTap = null
+            openTile(it)
+            return
+        }
+        if (!tv.turnsOnDoubleTap) {
+            openTile(tv)
+            return
+        }
+        pendingTap = tv
+        postDelayed(pendingTapRun, DOUBLE_TAP_MS)
+    }
+
     /** Opens the app on [view]: with the turnstile when that's the chosen animation. */
     private fun openTile(view: TileView) {
         if (!AppOpen.turnstile(launcher) || panel != null) {
@@ -814,7 +851,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         if (tile.isApp) InfoTiles.kindOf(tile.component.packageName)?.let { infoKind = it }
         infoChanged()
         onIconLoaded = { scheduleBrands() }
-        setOnClickListener { openTile(this) }
+        setOnClickListener { onTileTap(this) }
         // Long-press picks the tile up: drag to move it, or let go in place for its menu.
         setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -1576,6 +1613,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         private const val MENU_ADD_PHOTOS = 109
         private const val MENU_SHOW_WIDGET = 110
         private const val MENU_TURN = 113
+        /** How long a tile that turns on a double tap waits for the second tap. */
+        private const val DOUBLE_TAP_MS = 260L
         private const val MENU_TILE_SHOWS = 114
         private const val GROUP_SHOWS = 4
         private const val GROUP_ZOOM = 5

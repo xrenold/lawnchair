@@ -942,9 +942,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             shows.setGroupCheckable(GROUP_SHOWS, true, true)
             // Widget size: laid out bigger and shrunk to fit, so more of it shows on a small tile.
             val zoom = menu.menu.addSubMenu(Menu.NONE, MENU_WIDGET_SIZE, 2, "widget size")
-            val auto = if (MetroTheme.columns(launcher) >= 6) 75 else 100
+            val auto = if (MetroTheme.columns(launcher) >= 6) 70 else 85
             val current = if (tile.widgetScale == 0) auto else tile.widgetScale
-            listOf(100, 85, 75, 70).forEachIndexed { i, pct ->
+            listOf(100, 85, 70, 60).forEachIndexed { i, pct ->
                 zoom.add(GROUP_ZOOM, pct, i, "$pct%").setCheckable(true).isChecked = pct == current
             }
             zoom.setGroupCheckable(GROUP_ZOOM, true, true)

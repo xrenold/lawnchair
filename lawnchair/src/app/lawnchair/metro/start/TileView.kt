@@ -99,7 +99,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
     /** Widget zoom: 1 = the widget gets the tile's real size; less lays it out bigger and shrinks it. */
     private val widgetZoom: Float
         get() = when (tile.widgetScale) {
-            0 -> if (MetroTheme.columns(context) >= 6) 0.75f else 1f
+            0 -> if (MetroTheme.columns(context) >= 6) 0.7f else 0.85f
             else -> tile.widgetScale / 100f
         }
 

@@ -58,7 +58,7 @@ data class MetroTile(
     var widgetLoop: Boolean = false,
     /** App tile with a widget: the app's name over the widget, bottom left. */
     var widgetLabel: Boolean = true,
-    /** Widget zoom in percent (100, 85, 75, 70), or 0 for automatic (75 on 6 columns, else 100). */
+    /** Widget zoom in percent (100, 85, 70, 60), or 0 for automatic (70 on 6 columns, 85 on 4). */
     var widgetScale: Int = 0,
 ) {
     /** The colour choice that applies in the current mode. */

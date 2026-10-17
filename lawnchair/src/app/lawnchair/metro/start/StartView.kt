@@ -927,7 +927,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             }
             menu.menu.add(Menu.NONE, MENU_SLIDESHOW, 2, if (prefs.metroPhotoSlideshow.get()) "turn slideshow off" else "turn slideshow on")
         }
-        if (!locked && tile.isApp && tile.widgetId == 0 && MetroWidgets.hasWidgets(launcher, tile.component.packageName)) {
+        // Showing a widget on an app tile keeps the tile where it is, so it's allowed on a locked layout.
+        if (tile.isApp && tile.widgetId == 0 && MetroWidgets.hasWidgets(launcher, tile.component.packageName)) {
             menu.menu.add(Menu.NONE, MENU_SHOW_WIDGET, 2, "show widget")
         }
         if (tile.isApp && tile.widgetId != 0) {
@@ -936,12 +937,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             shows.add(GROUP_SHOWS, 0, 0, "widget").setCheckable(true).isChecked = !tile.widgetLoop
             shows.add(GROUP_SHOWS, 1, 1, "widget and icon").setCheckable(true).isChecked = tile.widgetLoop
             shows.setGroupCheckable(GROUP_SHOWS, true, true)
-            if (!locked) {
-                if (MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
-                    menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")
-                }
-                menu.menu.add(Menu.NONE, MENU_SHOW_APP_TILE, 2, "hide widget")
+            if (MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
+                menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")
             }
+            menu.menu.add(Menu.NONE, MENU_SHOW_APP_TILE, 2, "hide widget")
         }
         if (!locked && isWidget && MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
             menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")

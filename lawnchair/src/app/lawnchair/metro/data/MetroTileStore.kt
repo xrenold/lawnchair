@@ -213,7 +213,9 @@ class MetroTileStore(private val context: Context) {
         if (i < 0) return 0
         val old = tiles[i]
         tiles[i] = old.copy(
-            size = if (widgetId != 0 && old.size == TileSize.SMALL) fallbackSize else old.size,
+            // A small tile grows to fit the widget, unless Start's layout is locked (then it
+            // shows the icon until it's made bigger).
+            size = if (widgetId != 0 && old.size == TileSize.SMALL && !LayoutLock.isLocked(context)) fallbackSize else old.size,
             widgetId = widgetId,
             widgetLoop = if (widgetId == 0) false else old.widgetLoop,
         )

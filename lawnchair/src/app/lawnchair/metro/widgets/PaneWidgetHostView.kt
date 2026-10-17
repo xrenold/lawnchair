@@ -72,15 +72,37 @@ class PaneWidgetHostView(context: Context) : AppWidgetHostView(context) {
         post { restyle() }
     }
 
-    /** Clears the widget's card, or leaves it; sets the padding to match. */
+    /**
+     * Makes the widget see-through: its card is cleared so the content sits straight on the tile
+     * (its colour, or the background for see-through tiles). The card is the view marked
+     * `@android:id/background` (Material You widgets) or, for other widgets, any background that
+     * covers most of the widget. Smaller backgrounds (buttons, chips) and pictures (a map, album
+     * art) are kept. Not done when the tile keeps the widget's own look.
+     */
     private fun restyle() {
         val card = findViewById<View>(android.R.id.background)
         hasCard = card != null
-        if (card != null && !ownBackground) {
-            if (card.background != null) card.background = null
-            card.clipToOutline = false
-            // Some widgets round their inner panels too; let the tile's square edge win.
-            (card as? ViewGroup)?.clipChildren = true
+        if (ownBackground) return
+        if (card != null) clearCard(card)
+        if (width > 0 && height > 0) clearLargeBackgrounds(this, width * height)
+    }
+
+    private fun clearCard(v: View) {
+        if (v.background != null) v.background = null
+        v.clipToOutline = false
+    }
+
+    private fun clearLargeBackgrounds(group: ViewGroup, area: Int) {
+        for (i in 0 until group.childCount) {
+            val c = group.getChildAt(i)
+            if (c.background != null && c.width * c.height >= area * 0.6f) clearCard(c)
+            if (c is ViewGroup) clearLargeBackgrounds(c, area)
         }
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        // Sizes are known only after layout: clear the big backgrounds now (and after updates).
+        restyle()
     }
 }

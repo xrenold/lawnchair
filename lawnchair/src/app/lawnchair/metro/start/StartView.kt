@@ -187,8 +187,11 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         InfoTiles.addListener(infoListener)
         InfoTiles.start(launcher)
         // After a crash: offer to share the report (it never leaves the phone otherwise).
-        if (app.lawnchair.metro.CrashLog.takeUnseen(launcher)) {
+        // Checked a moment later: freezes and native crashes are read from Android's record in the
+        // background as Pane starts.
+        run {
             postDelayed({
+                if (!app.lawnchair.metro.CrashLog.takeUnseen(launcher)) return@postDelayed
                 val latest = app.lawnchair.metro.CrashLog.reports(launcher).firstOrNull()?.first ?: return@postDelayed
                 undoBar.show(
                     this,

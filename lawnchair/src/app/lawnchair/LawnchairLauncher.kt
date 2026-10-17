@@ -179,6 +179,8 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onCreate(savedInstanceState: Bundle?) {
         layoutInflater.factory2 = LawnchairLayoutFactory(this)
         super.onCreate(savedInstanceState)
+        // Something may have replaced the crash handler since the app started: put it back.
+        app.lawnchair.metro.CrashLog.ensureHandler()
 
         if (MetroMode.isStartEnabled(this)) {
             addStartView()

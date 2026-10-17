@@ -37,11 +37,91 @@ object CrashLog {
     fun install(context: Context) {
         val app = context.applicationContext
         appContext = app
-        val previous = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+        ensureHandler()
+        // Ends Android caused that no Java handler sees: a freeze (ANR), a native crash, being
+        // killed for memory. Android keeps a record; it's read at the next start.
+        Thread { runCatching { recordExitReasons(app) } }.start()
+    }
+
+    private var handler: Thread.UncaughtExceptionHandler? = null
+
+    /**
+     * Installs the crash handler, or installs it again if something set its own after (code
+     * that replaces the handler without passing errors on would hide every crash).
+     */
+    @JvmStatic
+    fun ensureHandler() {
+        val app = appContext ?: return
+        val current = Thread.getDefaultUncaughtExceptionHandler()
+        if (current != null && current === handler) return
+        val h = Thread.UncaughtExceptionHandler { thread, error ->
             runCatching { write(app, thread, error) }
-            previous?.uncaughtException(thread, error)
+            current?.uncaughtException(thread, error)
         }
+        handler = h
+        Thread.setDefaultUncaughtExceptionHandler(h)
+    }
+
+    /** Android's record of how Pane last ended, written as reports for the ends that matter. */
+    private fun recordExitReasons(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val am = context.getSystemService(android.app.ActivityManager::class.java) ?: return
+        val p = context.getSharedPreferences("metro_crash", Context.MODE_PRIVATE)
+        val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 10)
+        if (exits.isEmpty()) return
+        val newest = exits.maxOf { it.timestamp }
+        if (!p.contains("lastExit")) {
+            // First time: only what happens from now on counts.
+            p.edit().putLong("lastExit", newest).apply()
+            return
+        }
+        val last = p.getLong("lastExit", 0L)
+        p.edit().putLong("lastExit", maxOf(last, newest)).apply()
+        val ours = dir(context).listFiles { f -> f.name.startsWith("crash_") }.orEmpty()
+            .mapNotNull { it.name.removePrefix("crash_").removeSuffix(".txt").toLongOrNull() }
+        for (e in exits.filter { it.timestamp > last }.sortedBy { it.timestamp }) {
+            val reason = when (e.reason) {
+                android.app.ApplicationExitInfo.REASON_ANR -> "froze and was closed by Android (not responding)"
+                android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "crashed in native code"
+                android.app.ApplicationExitInfo.REASON_CRASH -> {
+                    // Java crashes are already reported by the handler; only add one it missed.
+                    if (ours.any { kotlin.math.abs(it - e.timestamp) < 10_000L }) continue
+                    "crashed"
+                }
+                android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "was closed by Android to free memory"
+                android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "was closed for using too much power or memory"
+                android.app.ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "failed to start"
+                else -> continue
+            }
+            val trace = if (e.reason == android.app.ApplicationExitInfo.REASON_ANR) {
+                // The main thread's stack shows what it was stuck on.
+                runCatching {
+                    e.traceInputStream?.bufferedReader()?.useLines { lines -> lines.take(250).joinToString("\n") }
+                }.getOrNull()
+            } else {
+                null
+            }
+            val text = buildString {
+                appendLine("Metro crash report")
+                appendLine("Time: ${synchronized(stamp) { stamp.format(Date(e.timestamp)) }}")
+                appendLine("Metro: ${versionName(context)}")
+                appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+                appendLine("Thread: -")
+                appendLine()
+                appendLine("Pane $reason.")
+                e.description?.let { appendLine("Android says: $it") }
+                appendLine("Memory: ${e.pss / 1024} MB in use (${e.rss / 1024} MB resident)")
+                if (trace != null) {
+                    appendLine()
+                    appendLine(trace)
+                }
+            }
+            File(dir(context), "crash_${e.timestamp}.txt").writeText(text)
+            p.edit().putBoolean("unseen", true).apply()
+        }
+        dir(context).listFiles { f -> f.name.startsWith("crash_") }.orEmpty().sortedByDescending { it.name }
+            .drop(MAX_REPORTS).forEach { it.delete() }
     }
 
     /** Notes a non-fatal problem; included in the next report. */

@@ -64,11 +64,8 @@ class PaneSetupActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = PreferenceManager.getInstance(this)
+        // Edge to edge (the default from Android 15); content keeps clear of the bars via insets.
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        @Suppress("DEPRECATION")
-        window.statusBarColor = Color.TRANSPARENT
-        @Suppress("DEPRECATION")
-        window.navigationBarColor = Color.TRANSPARENT
         root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         setContentView(root)
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->

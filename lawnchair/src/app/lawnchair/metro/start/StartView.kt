@@ -1073,8 +1073,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         })
         val menu = PopupMenu(launcher, anchor)
         val locked = LayoutLock.isLocked(launcher)
-        menu.menu.add(0, 4, 0, if (locked) "unlock start layout" else "lock start layout")
-        menu.menu.add(0, 3, 1, "pane settings")
+        if (!locked) menu.menu.add(0, 5, 0, "add widget")
+        menu.menu.add(0, 4, 1, if (locked) "unlock start layout" else "lock start layout")
+        menu.menu.add(0, 3, 2, "pane settings")
         menu.showPane(anchor, onDismiss = { removeView(anchor) }) { item ->
             when (item.itemId) {
                 4 -> {
@@ -1085,6 +1086,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                     }
                 }
                 3 -> launcher.startActivity(Intent(launcher, app.lawnchair.ui.preferences.PreferenceActivity::class.java))
+                // Every app's widgets, to add as a tile of its own at the end of Start.
+                5 -> app.lawnchair.metro.widgets.WidgetPicker.show(launcher, MetroWidgets.providers(launcher)) { info ->
+                    MetroWidgets.add(launcher, info)
+                }
             }
             true
         }

@@ -74,7 +74,6 @@
             android:name="app.lawnchair.metro.start.BackgroundPreviewActivity"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:screenOrientation="portrait"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <activity
@@ -82,7 +81,6 @@
             android:enableOnBackInvokedCallback="false"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:screenOrientation="portrait"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <activity

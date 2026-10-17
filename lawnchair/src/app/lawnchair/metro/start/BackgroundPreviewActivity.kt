@@ -81,9 +81,8 @@ class BackgroundPreviewActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = PreferenceManager.getInstance(this)
-        window.setDecorFitsSystemWindows(false)
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
+        // Edge to edge (the default from Android 15); content keeps clear of the bars via insets.
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         windowStyle = MetroTheme.background(this) == MetroTheme.BG_WINDOW
         level = prefs.metroLegibility.get()
 

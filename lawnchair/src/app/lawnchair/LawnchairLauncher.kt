@@ -641,8 +641,14 @@ class LawnchairLauncher : QuickstepLauncher() {
         super.onActivityResult(requestCode, resultCode, data)
     }
 
+    override fun onPause() {
+        super.onPause()
+        app.lawnchair.metro.Watchdog.stop()
+    }
+
     override fun onResume() {
         super.onResume()
+        app.lawnchair.metro.Watchdog.start()
         // Back on Start after an app or unlocking: the tiles settle onto Start.
         // Opened with the turnstile, they swing back in instead.
         if (metroAwayInApp) {

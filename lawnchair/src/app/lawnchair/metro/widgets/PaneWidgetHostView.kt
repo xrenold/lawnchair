@@ -37,6 +37,13 @@ class PaneWidgetHostView(context: Context) : AppWidgetHostView(context) {
     /** The screen the view was made for (it's inflated with a plain context; see MetroWidgets). */
     var owner: Context? = null
 
+    /** The size last sent to the widget's app (see MetroWidgets.updateSize). */
+    var sentWidth = 0
+    var sentHeight = 0
+
+    /** The failure has been logged (once is enough: the app may resend its widget often). */
+    private var failureLogged = false
+
     /** Set when Android couldn't build the widget's content ("Can't load widget"). */
     private var failed = false
 
@@ -45,7 +52,8 @@ class PaneWidgetHostView(context: Context) : AppWidgetHostView(context) {
         super.updateAppWidget(remoteViews)
         val had = hasContent
         hasContent = remoteViews != null && !failed
-        if (failed && remoteViews != null) {
+        if (failed && remoteViews != null && !failureLogged) {
+            failureLogged = true
             // Find out why, for the crash report: build it once more and keep the error.
             val error = runCatching { remoteViews.apply(context, this) }.exceptionOrNull()
             app.lawnchair.metro.CrashLog.event(

@@ -174,6 +174,11 @@ object MetroWidgets {
 
     /** Routes the bind / configure results. Returns true if the result was ours. */
     fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int): Boolean {
+        if ((requestCode == REQUEST_BIND || requestCode == REQUEST_CONFIGURE) && pending == null) {
+            // Pane was closed while the other screen was up: the widget being added is lost.
+            CrashLog.event(TAG, "result $resultCode for a widget no longer pending")
+            return true
+        }
         when (requestCode) {
             REQUEST_BIND -> if (resultCode == Activity.RESULT_OK) {
                 afterBind(activity)
@@ -185,7 +190,7 @@ object MetroWidgets {
             REQUEST_CONFIGURE -> if (resultCode == Activity.RESULT_OK) {
                 finish(activity)
             } else {
-                CrashLog.event(TAG, "setup cancelled ($resultCode)")
+                CrashLog.event(TAG, "setup cancelled ($resultCode); widget ${pending?.id} removed")
                 cancel(activity)
             }
             else -> return false
@@ -215,6 +220,13 @@ object MetroWidgets {
 
     /** Tells the widget the space it really has, so it picks the right layout. */
     fun updateSize(view: AppWidgetHostView, widthPx: Int, heightPx: Int) {
+        if (widthPx <= 0 || heightPx <= 0) return
+        // Only a real change is sent: each one makes the app rebuild and resend its widget.
+        (view as? PaneWidgetHostView)?.let {
+            if (it.sentWidth == widthPx && it.sentHeight == heightPx) return
+            it.sentWidth = widthPx
+            it.sentHeight = heightPx
+        }
         val d = view.resources.displayMetrics.density
         // The host view's own padding comes off the space the widget gets.
         val w = (widthPx - view.paddingLeft - view.paddingRight) / d

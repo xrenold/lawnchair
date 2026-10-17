@@ -37,7 +37,17 @@ object CrashLog {
     fun install(context: Context) {
         val app = context.applicationContext
         appContext = app
+        // The last run's events, kept for a report on how it ended (see recordExitReasons).
+        runCatching {
+            val log = File(dir(app), "events.log")
+            val prev = File(dir(app), "events_prev.log")
+            if (log.exists()) {
+                prev.delete()
+                log.renameTo(prev)
+            }
+        }
         ensureHandler()
+        event("app", "started")
         // Ends Android caused that no Java handler sees: a freeze (ANR), a native crash, being
         // killed for memory. Android keeps a record; it's read at the next start.
         Thread { runCatching { recordExitReasons(app) } }.start()
@@ -116,6 +126,13 @@ object CrashLog {
                     appendLine()
                     appendLine(trace)
                 }
+                // What Pane was doing before it ended (events, freezes; see Watchdog).
+                val before = if (e.timestamp != newest) emptyList() else runCatching { File(dir(context), "events_prev.log").readLines().takeLast(60) }.getOrDefault(emptyList())
+                if (before.isNotEmpty()) {
+                    appendLine()
+                    appendLine("Recent events:")
+                    before.forEach { appendLine(it) }
+                }
             }
             File(dir(context), "crash_${e.timestamp}.txt").writeText(text)
             p.edit().putBoolean("unseen", true).apply()
@@ -132,7 +149,18 @@ object CrashLog {
             events.addLast(line)
             while (events.size > MAX_EVENTS) events.removeFirst()
         }
+        // Also kept on disk: a freeze or a kill leaves no time to write anything afterwards.
+        val app = appContext ?: return
+        writer.execute {
+            runCatching {
+                val f = File(dir(app), "events.log")
+                if (f.length() > 64_000) f.writeText(f.readLines().takeLast(200).joinToString("\n", postfix = "\n"))
+                f.appendText(line + "\n")
+            }
+        }
     }
+
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     private fun versionName(context: Context): String = runCatching {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)

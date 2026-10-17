@@ -763,6 +763,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     /** Back on Start after an app: tiles swing back in if they turned away, else they settle. */
     fun playComeBack() {
+        // Anything left mid-turn when Start was left lies flat again before the tiles come back.
+        allTiles().forEach { it.settleTurn() }
         if (turnedAway) playReturn() else playLanding()
     }
 
@@ -783,8 +785,9 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             return
         }
         turnedAway = true
-        // The tapped tile swings at full size, not still pressed in.
+        // The tapped tile swings at full size, not still pressed in; a tile mid-turn lies flat.
         view.releasePress()
+        allTiles().forEach { it.settleTurn() }
         Turnstile.out(swingViews(), view, onFrame = { grid.invalidate() }, onLaunch = {
             startApp(view)
             // If we're still in front (launch failed or slow), bring the tiles back.

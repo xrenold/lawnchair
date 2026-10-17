@@ -136,10 +136,17 @@ class WidgetTileView(
         }
     }
 
-    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+    /**
+     * Every touch is followed here, not in onInterceptTouchEvent: that stops being called once
+     * something in the widget asks its parents to keep out (a list scrolling, a button pressed),
+     * and the long press must still be cancelled by a move, and, once it has picked the tile
+     * up, get the rest of the gesture (the drag, or the menu on release).
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 stolen = false
+                removeCallbacks(longPress)
                 downX = ev.x
                 downY = ev.y
                 downRawX = ev.rawX
@@ -155,8 +162,11 @@ class WidgetTileView(
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> removeCallbacks(longPress)
         }
-        return stolen
+        if (stolen && ev.actionMasked != MotionEvent.ACTION_DOWN) return onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
     }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean = stolen
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {

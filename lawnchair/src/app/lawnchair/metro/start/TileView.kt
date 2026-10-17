@@ -1446,6 +1446,14 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         if (windowMode) (parent as? View)?.invalidate()
     }
 
+    /**
+     * A turn cut short (another animation took the tile over, e.g. the turnstile when an app was
+     * opened mid-turn) leaves the tile edge-on and unable to turn again. This puts it back flat.
+     */
+    fun settleTurn() {
+        if (flipping || rotationX != 0f) resetFace()
+    }
+
     /** Snaps back to the front face immediately (e.g. when Start is left). */
     fun resetFace() {
         removeCallbacks(cycleRunnable)

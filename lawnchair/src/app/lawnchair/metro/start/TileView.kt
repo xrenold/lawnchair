@@ -182,6 +182,19 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
 
     /** When the widget was last touched: the tile holds still for a while after. */
     private var widgetTouchedAt = 0L
+    /** True while a finger is on the widget. */
+    private var widgetTouching = false
+    private var deferredTurn = Runnable {}
+
+    /**
+     * How much longer the widget face must stay put (0 = free to turn): while it's being touched
+     * and for 10 seconds after.
+     */
+    private fun widgetHeldFor(): Long {
+        if (!showsWidget) return 0L
+        if (widgetTouching) return 1000L
+        return (widgetTouchedAt + 10_000L - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
     private val loopRandom = java.util.Random()
     private val loopRunnable = Runnable { loopTurn() }
 
@@ -210,6 +223,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
 
     override fun onDetachedFromWindow() {
         removeCallbacks(loopRunnable)
+        removeCallbacks(deferredTurn)
         super.onDetachedFromWindow()
     }
 
@@ -229,6 +243,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 widgetStolen = false
+                widgetTouching = true
                 widgetTouchedAt = System.currentTimeMillis()
                 downX = ev.x
                 downY = ev.y
@@ -244,6 +259,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(widgetLongPress)
+                widgetTouching = false
                 widgetTouchedAt = System.currentTimeMillis()
             }
         }
@@ -388,6 +404,11 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
     /** Shows the back face at once, without animating (for off-screen tiles). */
     fun showBackNow() {
         if (showingBack || !hasBackFace) return
+        if (widgetHeldFor() > 0L) {
+            // Being used: turn over properly once it's left alone instead of switching under the finger.
+            turn(swap = true)
+            return
+        }
         showingBack = true
         lastFlipAt = System.currentTimeMillis()
         invalidate()
@@ -1305,6 +1326,14 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
 
     private fun turn(swap: Boolean, midway: (() -> Unit)? = null) {
         if (flipping) return
+        // Never turn the widget away under a finger, or just after: wait until it's left alone.
+        val held = widgetHeldFor()
+        if (held > 0L) {
+            removeCallbacks(deferredTurn)
+            deferredTurn = Runnable { turn(swap, midway) }
+            postDelayed(deferredTurn, held + 200L)
+            return
+        }
         slideshow?.release() // a flip runs at full smoothness; the slideshow asks again once still
         if (swap && !showingBack && !hasBackFace) return
         val toContent = !swap || !showingBack
@@ -1428,7 +1457,13 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         // The touch came to the tile itself (not the widget's buttons): its own long press
         // applies, so the widget's timer must not fire after the finger has lifted.
         if (!widgetStolen) removeCallbacks(widgetLongPress)
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) widgetStolen = false
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            widgetStolen = false
+            if (widgetTouching) {
+                widgetTouching = false
+                widgetTouchedAt = System.currentTimeMillis()
+            }
+        }
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             downX = event.x
             downY = event.y

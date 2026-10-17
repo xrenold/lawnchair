@@ -192,6 +192,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
      */
     private fun widgetHeldFor(): Long {
         if (!showsWidget) return 0L
+        if (lifted) return 1000L
         if (widgetTouching) return 1000L
         return (widgetTouchedAt + 10_000L - System.currentTimeMillis()).coerceAtLeast(0L)
     }
@@ -238,31 +239,53 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         performLongClick()
     }
 
-    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        if (!showsWidget) return true // the tile itself takes every touch
-        when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                widgetStolen = false
-                widgetTouching = true
-                widgetTouchedAt = System.currentTimeMillis()
-                downX = ev.x
-                downY = ev.y
-                downRawX = ev.rawX
-                downRawY = ev.rawY
-                postDelayed(widgetLongPress, android.view.ViewConfiguration.getLongPressTimeout().toLong())
-                if (scrollableAt(this, ev.x, ev.y)) parent?.requestDisallowInterceptTouchEvent(true)
+    /**
+     * Touches on the widget. Tracked here rather than in onInterceptTouchEvent, which stops being
+     * called once a list inside the widget starts scrolling (it asks its parents to keep out):
+     * the long-press timer must still be cancelled by that scroll. Once a long press has picked
+     * the tile up, the rest of the gesture goes to the tile itself (the drag), not the widget.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (widgetView != null) {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    widgetStolen = false
+                    removeCallbacks(widgetLongPress)
+                    if (showsWidget) {
+                        widgetTouching = true
+                        widgetTouchedAt = System.currentTimeMillis()
+                        downX = ev.x
+                        downY = ev.y
+                        downRawX = ev.rawX
+                        downRawY = ev.rawY
+                        postDelayed(widgetLongPress, android.view.ViewConfiguration.getLongPressTimeout().toLong())
+                        if (scrollableAt(this, ev.x, ev.y)) parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                }
+                MotionEvent.ACTION_MOVE -> if (kotlin.math.hypot(ev.rawX - downRawX, ev.rawY - downRawY) >
+                    android.view.ViewConfiguration.get(context).scaledTouchSlop
+                ) {
+                    removeCallbacks(widgetLongPress)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    removeCallbacks(widgetLongPress)
+                    if (widgetTouching) {
+                        widgetTouching = false
+                        widgetTouchedAt = System.currentTimeMillis()
+                    }
+                }
             }
-            MotionEvent.ACTION_MOVE -> if (kotlin.math.hypot(ev.rawX - downRawX, ev.rawY - downRawY) >
-                android.view.ViewConfiguration.get(context).scaledTouchSlop
-            ) {
-                removeCallbacks(widgetLongPress)
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                removeCallbacks(widgetLongPress)
-                widgetTouching = false
-                widgetTouchedAt = System.currentTimeMillis()
+            if (widgetStolen && ev.actionMasked != MotionEvent.ACTION_DOWN) {
+                val r = onTouchEvent(ev)
+                if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) widgetStolen = false
+                return r
             }
         }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (!showsWidget) return true // the tile itself takes every touch
         return widgetStolen
     }
 

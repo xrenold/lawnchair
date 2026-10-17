@@ -162,8 +162,13 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
                 v.layout(0, 0, w, headerHeight.toInt())
             }
             v.letter = letter
-            v.alpha = 1f
-            val save = c.save()
+            // While scrubbing, a sticky letter other than the picked one fades with the rest.
+            val dim = if (focusLetter != null && letter != focusLetter) 1f - 0.72f * veil else 1f
+            val save = if (dim < 1f) {
+                c.saveLayerAlpha(0f, stickyTop, w.toFloat(), stickyBottom, (255 * dim).toInt())
+            } else {
+                c.save()
+            }
             c.translate(0f, stickyTop)
             v.draw(c)
             c.restoreToCount(save)
@@ -176,22 +181,91 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     // ---- Greying while scrubbing ------------------------------------------------------------
 
-    /** While a finger is on the letters, the section being picked; the other apps grey out. */
+    /**
+     * While a finger is on the letters, the section being picked. Everything above and below it
+     * sits under one smooth dark veil with soft edges (not row by row, so no seams), which fades
+     * in as the finger lands and out as it lets go.
+     */
     private var focusLetter: Char? = null
+    private var veil = 0f
+    private var veilAnim: ValueAnimator? = null
 
     private fun setFocusLetter(letter: Char?) {
-        if (focusLetter == letter) return
-        focusLetter = letter
-        for (i in 0 until list.childCount) {
-            val child = list.getChildAt(i)
-            val target = alphaFor(list.getChildAdapterPosition(child))
-            if (letter == null) child.animate().alpha(target).setDuration(150).start() else child.alpha = target
+        if (letter != null) focusLetter = letter
+        val to = if (letter == null) 0f else 1f
+        if (veilAnim?.isRunning != true && veil == to) {
+            list.invalidate()
+            return
+        }
+        veilAnim?.cancel()
+        veilAnim = ValueAnimator.ofFloat(veil, to).apply {
+            duration = if (to > 0f) 160 else 240
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                veil = it.animatedValue as Float
+                list.invalidate()
+            }
+            if (to == 0f) {
+                addListener(object : android.animation.AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        if (veil == 0f) focusLetter = null
+                    }
+                })
+            }
+            start()
         }
     }
 
-    private fun alphaFor(pos: Int): Float {
-        val f = focusLetter ?: return 1f
-        return if (pos >= 0 && rowLetters.getOrNull(pos) == f) 1f else 0.25f
+    private inner class ScrubVeil : RecyclerView.ItemDecoration() {
+        private val paint = android.graphics.Paint()
+        private val fadePaint = android.graphics.Paint()
+        private val feather = dp(28f)
+
+        override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+            val letter = focusLetter ?: return
+            if (veil <= 0f) return
+            // The picked section's extent on screen: from its header to the next header.
+            var top = Float.NaN
+            var bottom = Float.NaN
+            for (i in 0 until parent.childCount) {
+                val child = parent.getChildAt(i)
+                val pos = parent.getChildAdapterPosition(child)
+                if (pos < 0 || rowLetters.getOrNull(pos) != letter) continue
+                val t = child.top + child.translationY
+                val b = t + child.height
+                if (top.isNaN() || t < top) top = t
+                if (bottom.isNaN() || b > bottom) bottom = b
+            }
+            val w = parent.width.toFloat()
+            val h = parent.height.toFloat()
+            val alpha = (0xB8 * veil).toInt()
+            paint.color = Color.argb(alpha, 0, 0, 0)
+            if (top.isNaN()) {
+                c.drawRect(0f, 0f, w, h, paint)
+                return
+            }
+            // Above the section, fading out just before its header…
+            if (top > 0f) {
+                c.drawRect(0f, 0f, w, (top - feather).coerceAtLeast(0f), paint)
+                drawFade(c, w, top - feather, top, alpha, down = true)
+            }
+            // …and below it, fading in just after its last app.
+            if (bottom < h) {
+                drawFade(c, w, bottom, bottom + feather, alpha, down = false)
+                c.drawRect(0f, bottom + feather, w, h, paint)
+            }
+        }
+
+        private fun drawFade(c: Canvas, w: Float, from: Float, to: Float, alpha: Int, down: Boolean) {
+            val solid = Color.argb(alpha, 0, 0, 0)
+            val clear = Color.argb(0, 0, 0, 0)
+            fadePaint.shader = android.graphics.LinearGradient(
+                0f, from, 0f, to,
+                if (down) solid else clear, if (down) clear else solid,
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+            c.drawRect(0f, from, w, to, fadePaint)
+        }
     }
     private val scrubber = AlphabetScrubber(launcher) { letter, y -> jumpTo(letter, y) }
     private val sectionPositions = HashMap<Char, Int>()
@@ -267,6 +341,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         list.isVerticalScrollBarEnabled = false
         list.itemAnimator = null
         list.addItemDecoration(WindowMask())
+        list.addItemDecoration(ScrubVeil())
         list.addItemDecoration(StickyHeader())
         // Scrolling the results, or tapping empty space, puts the keyboard away.
         // A finger on the letters stops a moving list before it jumps.
@@ -902,8 +977,6 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-            holder.itemView.animate().cancel()
-            holder.itemView.alpha = alphaFor(position)
             when (val row = rows[position]) {
                 is Row.Header -> (holder.itemView as HeaderView).letter = row.letter
                 is Row.App -> (holder.itemView as AppRowView).apply {

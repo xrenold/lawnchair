@@ -29,25 +29,15 @@ import java.util.concurrent.Executors
  */
 class PhotoSlideshow(private val view: View) {
 
-    companion object {
-        private val all = java.util.Collections.newSetFromMap(java.util.WeakHashMap<PhotoSlideshow, Boolean>())
+    private object Registry {
+        val all = java.util.Collections.newSetFromMap(java.util.WeakHashMap<PhotoSlideshow, Boolean>())
 
         /** Until when Start is scrolling (uptime): the drift waits so scrolling gets the frames. */
         @Volatile var scrollingUntil = 0L
-
-        /** Start scrolled: hold the drift for a moment. */
-        fun onScroll() {
-            scrollingUntil = android.os.SystemClock.uptimeMillis() + 250
-        }
-
-        /** Memory is short: drop the preloaded next photos (they load again when needed). */
-        fun trim() {
-            all.toList().forEach { it.dropNext() }
-        }
     }
 
     init {
-        all += this
+        Registry.all += this
     }
 
     private fun dropNext() {
@@ -276,7 +266,7 @@ class PhotoSlideshow(private val view: View) {
         if (animating) {
             val wait = when {
                 !view.getLocalVisibleRect(visible) -> 2000L
-                android.os.SystemClock.uptimeMillis() < scrollingUntil -> 250L
+                android.os.SystemClock.uptimeMillis() < Registry.scrollingUntil -> 250L
                 else -> 33L
             }
             view.postInvalidateDelayed(wait)
@@ -351,5 +341,15 @@ class PhotoSlideshow(private val view: View) {
         private const val FADE_MS = 1_500L
         private const val STILL_MS = 30_000L
         private const val ICON_MS = 60_000L
+
+        /** Start scrolled: hold the drift for a moment. */
+        fun onScroll() {
+            Registry.scrollingUntil = android.os.SystemClock.uptimeMillis() + 250
+        }
+
+        /** Memory is short: drop the preloaded next photos (they load again when needed). */
+        fun trim() {
+            Registry.all.toList().forEach { it.dropNext() }
+        }
     }
 }

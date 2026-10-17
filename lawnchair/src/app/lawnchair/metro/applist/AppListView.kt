@@ -166,7 +166,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             }
             v.letter = letter
             // While scrubbing, a sticky letter other than the picked one fades with the rest.
-            val dim = if (focusLetter != null && letter != focusLetter) 1f - 0.72f * veil else 1f
+            val dim = if (focusLetter != null && letter != focusLetter) 1f - 0.3f * veil else 1f
             val save = if (dim < 1f) {
                 c.saveLayerAlpha(0f, stickyTop, w.toFloat(), stickyBottom, (255 * dim).toInt())
             } else {
@@ -222,7 +222,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private inner class ScrubVeil : RecyclerView.ItemDecoration() {
         private val paint = android.graphics.Paint()
         private val fadePaint = android.graphics.Paint()
-        private val feather = dp(28f)
+        private val feather = dp(72f)
 
         override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
             val letter = focusLetter ?: return
@@ -241,7 +241,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
             }
             val w = parent.width.toFloat()
             val h = parent.height.toFloat()
-            val alpha = (0xB8 * veil).toInt()
+            val alpha = (0x48 * veil).toInt()
             paint.color = Color.argb(alpha, 0, 0, 0)
             if (top.isNaN()) {
                 c.drawRect(0f, 0f, w, h, paint)

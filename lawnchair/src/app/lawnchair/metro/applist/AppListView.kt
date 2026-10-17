@@ -649,6 +649,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     fun open() {
         if (isOpen) return
         isOpen = true
+        settleRows()
         visibility = VISIBLE
         list.scrollToPosition(0)
         // The keyboard may have closed while we were away: measure again for how things are now.
@@ -666,6 +667,9 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     fun close(animate: Boolean) {
         if (!isOpen) return
         isOpen = false
+        // Left for Start while the rows were swung away (opened an app, then went home): put
+        // them back, so the list isn't half-missing next time.
+        settleRows()
         // Re-sort for next time while the list is out of sight, so rows never move under you.
         postDelayed({ if (!isOpen) refreshUsage() }, 600)
         panel?.close(animate = false)
@@ -703,6 +707,16 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private var turnedAway = false
 
     private fun visibleRows(): List<View> = (0 until list.childCount).map { list.getChildAt(it) }
+
+    /** Puts every row back at rest (no swing), e.g. when the list was left while turned away. */
+    private fun settleRows() {
+        if (!turnedAway) return
+        turnedAway = false
+        val rows = visibleRows()
+        app.lawnchair.metro.motion.Turnstile.reset(rows)
+        rows.forEach { it.scaleX = 1f; it.scaleY = 1f }
+        list.invalidate()
+    }
 
     /** Called when the launcher comes back from an app: rows swing back in. */
     fun playReturn() {
@@ -1001,6 +1015,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
         }
 
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            // A recycled row may still be turned away from the turnstile.
+            if (!turnedAway) app.lawnchair.metro.motion.Turnstile.reset(listOf(holder.itemView))
             when (val row = rows[position]) {
                 is Row.Header -> (holder.itemView as HeaderView).letter = row.letter
                 is Row.App -> (holder.itemView as AppRowView).apply {

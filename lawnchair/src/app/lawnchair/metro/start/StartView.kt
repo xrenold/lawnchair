@@ -783,6 +783,8 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
             return
         }
         turnedAway = true
+        // The tapped tile swings at full size, not still pressed in.
+        view.releasePress()
         Turnstile.out(swingViews(), view, onFrame = { grid.invalidate() }, onLaunch = {
             startApp(view)
             // If we're still in front (launch failed or slow), bring the tiles back.

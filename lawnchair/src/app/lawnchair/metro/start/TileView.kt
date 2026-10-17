@@ -452,8 +452,39 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         }
     }
 
+    /** Press feedback on see-through tiles: 0..1 of a light darkening. */
+    private var pressShade = 0f
+    private var pressAnim: android.animation.ValueAnimator? = null
+
+    private fun animatePressShade(to: Float, ms: Long) {
+        pressAnim?.cancel()
+        pressAnim = android.animation.ValueAnimator.ofFloat(pressShade, to).apply {
+            duration = ms
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                pressShade = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    /** Back to rest at once (e.g. as the turnstile takes the tapped tile away). */
+    fun releasePress() {
+        pressAnim?.cancel()
+        pressShade = 0f
+        animate().cancel()
+        scaleX = 1f
+        scaleY = 1f
+        invalidate()
+    }
+
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
+        if (pressShade > 0f) {
+            shadePaint.color = Color.argb((pressShade * 0.28f * 255).toInt(), 0, 0, 0)
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shadePaint)
+        }
         if (landingShade > 0f) {
             shadePaint.color = Color.argb((landingShade * 0.4f * 255).toInt(), 0, 0, 0)
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shadePaint)
@@ -1355,11 +1386,20 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
             return true
         }
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> animate().scaleX(0.96f).scaleY(0.96f).setDuration(90)
-                .setInterpolator(DecelerateInterpolator()).setUpdateListener { syncWindow() }.start()
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+            MotionEvent.ACTION_DOWN -> if (isWindow) {
+                // A see-through tile can't sink: the photo in it doesn't shrink, so its edge would
+                // just cut into the picture beside it. It darkens a little instead.
+                animatePressShade(1f, 90)
+            } else {
+                animate().scaleX(0.96f).scaleY(0.96f).setDuration(90)
+                    .setInterpolator(DecelerateInterpolator()).setUpdateListener { syncWindow() }.start()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (isWindow) {
+                animatePressShade(0f, 160)
+            } else {
                 animate().scaleX(1f).scaleY(1f).setDuration(120)
                     .setInterpolator(DecelerateInterpolator()).setUpdateListener { syncWindow() }.start()
+            }
         }
         return super.onTouchEvent(event)
     }

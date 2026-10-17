@@ -1490,6 +1490,9 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         // The touch came to the tile itself (not the widget's buttons): its own long press
         // applies, so the widget's timer must not fire after the finger has lifted.
         if (!widgetStolen) removeCallbacks(widgetLongPress)
+        // The widget's long press already acted (picked the tile up, or opened its menu on a
+        // locked layout): the rest of this touch must not also tap the tile and open the app.
+        val afterWidgetLongPress = widgetStolen
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             widgetStolen = false
             if (widgetTouching) {
@@ -1508,6 +1511,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
             animatePressShade(0f, 160)
         }
         dragHandler?.let { if (it(event)) return true }
+        if (afterWidgetLongPress) return true
         // Media buttons on the back of a music tile take the touch instead of opening the app.
         if (event.actionMasked == MotionEvent.ACTION_DOWN && controlsShown) {
             controlGesture = controlRects.indexOfFirst { it.contains(event.x, event.y) }

@@ -139,7 +139,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
     private var labelShadeH = -1
 
     private fun drawWidgetLabel(canvas: Canvas) {
-        if (!showsWidget || !tile.widgetLabel || tile.size == TileSize.SMALL || label.isEmpty()) return
+        if (!showsWidget || tile.size == TileSize.SMALL || label.isEmpty()) return
         val w = width.toFloat()
         val h = height.toFloat()
         val shadeH = dp(44f) * k

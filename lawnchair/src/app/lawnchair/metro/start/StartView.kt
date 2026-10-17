@@ -985,7 +985,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 zoom.add(GROUP_ZOOM, pct, i, "$pct%").setCheckable(true).isChecked = pct == current
             }
             zoom.setGroupCheckable(GROUP_ZOOM, true, true)
-            menu.menu.add(Menu.NONE, MENU_WIDGET_NAME, 2, if (tile.widgetLabel) "hide name" else "show name")
             if (MetroWidgets.providers(launcher, tile.component.packageName).size > 1) {
                 menu.menu.add(Menu.NONE, MENU_CHANGE_WIDGET, 2, "change widget")
             }
@@ -1020,10 +1019,6 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
                 }
                 item.groupId == GROUP_ZOOM -> {
                     tile.widgetScale = item.itemId
-                    commit(view)
-                }
-                item.itemId == MENU_WIDGET_NAME -> {
-                    tile.widgetLabel = !tile.widgetLabel
                     commit(view)
                 }
                 item.itemId == MENU_CHANGE_WIDGET -> {

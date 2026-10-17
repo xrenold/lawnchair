@@ -1325,7 +1325,7 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
     fun photoWantsTurn(): Boolean = infoKind == InfoKind.PHOTOS && slideshow?.wantsTurn() == true && !flipping
 
     /**
-     * Turned over by hand (two-finger tap, or "turn over" in its menu): the photo tile goes to
+     * Turned over by hand (double tap, or "turn over" in its menu): the photo tile goes to
      * its next photo, a tile with content flips between its icon and the content, and any
      * other tile gives a single turn.
      */

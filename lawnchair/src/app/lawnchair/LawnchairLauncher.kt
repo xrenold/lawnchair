@@ -642,7 +642,14 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onResume() {
         super.onResume()
         // Back on Start after an app or unlocking: the tiles settle onto Start.
-        if (metroAwayInApp && metroAppList?.isOpen != true) startView?.post { startView?.playLanding() }
+        // Opened with the turnstile, they swing back in instead.
+        if (metroAwayInApp) {
+            if (metroAppList?.isOpen == true) {
+                metroAppList?.post { metroAppList?.playReturn() }
+            } else {
+                startView?.post { startView?.playComeBack() }
+            }
+        }
         metroAwayInApp = false
         restartIfPending()
         rebuildStartIfChanged()

@@ -35,6 +35,7 @@ import app.lawnchair.metro.data.MetroShortcuts
 import app.lawnchair.metro.data.MetroUsage
 import app.lawnchair.metro.widgets.MetroWidgets
 import app.lawnchair.metro.live.LiveInfo
+import app.lawnchair.metro.motion.AppOpen
 import app.lawnchair.metro.motion.Turnstile
 import app.lawnchair.metro.live.LiveTileData
 import app.lawnchair.metro.info.InfoKind
@@ -760,23 +761,36 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     /** True between launching an app and coming back, so the return plays the turnstile. */
     private var turnedAway = false
 
-    /** Called when Start becomes visible again after an app: tiles swing back in. */
-    fun playReturn() {
-        if (!turnedAway && panProgress > 0f) return
-        turnedAway = false
-        val all = allTiles()
-        Turnstile.reset(all)
-        all.forEach { it.scaleX = 1f; it.scaleY = 1f }
-        Turnstile.into(visibleTiles()) { grid.invalidate() }
+    /** Every tile on screen (app and widget tiles), for the turnstile. */
+    private fun swingViews(): List<View> = grid.tiles.filter { it.getLocalVisibleRect(visibleRect) }
+
+    /** Back on Start after an app: tiles swing back in if they turned away, else they settle. */
+    fun playComeBack() {
+        if (turnedAway) playReturn() else playLanding()
     }
 
-    private fun launchWithTurnstile(view: TileView) {
+    /** Called when Start becomes visible again after an app: tiles swing back in. */
+    fun playReturn() {
+        if (!turnedAway) return
+        turnedAway = false
+        val all = grid.tiles
+        Turnstile.reset(all)
+        all.forEach { it.scaleX = 1f; it.scaleY = 1f }
+        Turnstile.into(swingViews()) { grid.invalidate() }
+    }
+
+    /** Opens the app on [view]: with the turnstile when that's the chosen animation. */
+    private fun openTile(view: TileView) {
+        if (!AppOpen.turnstile(launcher) || panel != null) {
+            startApp(view)
+            return
+        }
         turnedAway = true
-        Turnstile.out(visibleTiles(), view, onFrame = { grid.invalidate() }) {
+        Turnstile.out(swingViews(), view, onFrame = { grid.invalidate() }, onLaunch = {
             startApp(view)
             // If we're still in front (launch failed or slow), bring the tiles back.
             postDelayed({ if (hasWindowFocus()) playReturn() }, 1200)
-        }
+        })
     }
 
     private fun createTileView(tile: MetroTile): View {
@@ -796,7 +810,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         if (tile.isApp) InfoTiles.kindOf(tile.component.packageName)?.let { infoKind = it }
         infoChanged()
         onIconLoaded = { scheduleBrands() }
-        setOnClickListener { startApp(this) }
+        setOnClickListener { openTile(this) }
         // Long-press picks the tile up: drag to move it, or let go in place for its menu.
         setOnLongClickListener {
             it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -809,7 +823,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val app = MetroWidgets.appFor(launcher, view.tile.component) ?: return
         val bounds = Rect()
         view.getGlobalVisibleRect(bounds)
-        val options = ActivityOptions.makeClipRevealAnimation(view, 0, 0, view.width, view.height).toBundle()
+        val options = AppOpen.options(launcher, view)
         runCatching {
             launcher.getSystemService(LauncherApps::class.java)?.startMainActivity(app, Process.myUserHandle(), bounds, options)
             MetroUsage.recordLaunch(launcher, app.packageName)
@@ -832,7 +846,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         val launcherApps = launcher.getSystemService(LauncherApps::class.java) ?: return
         val bounds = Rect()
         view.getGlobalVisibleRect(bounds)
-        val options = ActivityOptions.makeClipRevealAnimation(view, 0, 0, view.width, view.height).toBundle()
+        val options = AppOpen.options(launcher, view)
         // Info tiles: tap an event on the calendar tile to open it; the clock tile opens the alarm.
         view.calendarEventAt(view.downX, view.downY)?.let {
             InfoTiles.openEvent(launcher, it)

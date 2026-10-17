@@ -60,6 +60,17 @@ fun MetroPreferenceGroups() {
         }
         ExpandAndShrink(visible = startEnabled.state.value) {
             ListPreference(
+                adapter = prefs.metroLaunchAnimation.getAdapter(),
+                label = "app opening animation",
+                entries = listOf(
+                    ListPreferenceEntry(app.lawnchair.metro.motion.AppOpen.TURNSTILE) { "turnstile (windows phone)" },
+                    ListPreferenceEntry(app.lawnchair.metro.motion.AppOpen.ZOOM) { "zoom from the tile" },
+                    ListPreferenceEntry(app.lawnchair.metro.motion.AppOpen.NONE) { "none" },
+                ),
+            )
+        }
+        ExpandAndShrink(visible = startEnabled.state.value) {
+            ListPreference(
                 adapter = prefs.metroBackground.getAdapter(),
                 label = "background",
                 entries = listOf(

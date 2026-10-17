@@ -47,6 +47,7 @@ import android.widget.Toast
 import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import app.lawnchair.metro.motion.AppOpen
 import app.lawnchair.LawnchairLauncher
 import app.lawnchair.metro.data.MetroTileStore
 import app.lawnchair.metro.live.LiveInfo
@@ -155,6 +156,8 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     private inner class StickyHeader : RecyclerView.ItemDecoration() {
         override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
             val letter = stickyLetter ?: return
+            // While the rows swing away, the sticky letter goes with them.
+            if (turnedAway) return
             val v = stickyView
             val w = parent.width
             if (v.width != w || v.height != headerHeight.toInt()) {
@@ -703,7 +706,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     /** Called when the launcher comes back from an app: rows swing back in. */
     fun playReturn() {
-        if (!isOpen) return
+        if (!isOpen || !turnedAway) return
         turnedAway = false
         val rows = visibleRows()
         Turnstile.reset(rows)
@@ -873,14 +876,22 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     private fun launch(info: AppInfo, view: View) {
         hideKeyboard()
-        startApp(info, view)
+        if (!AppOpen.turnstile(launcher) || view === search) {
+            startApp(info, view)
+            return
+        }
+        turnedAway = true
+        app.lawnchair.metro.motion.Turnstile.out(visibleRows(), view, onFrame = { list.invalidate() }, onLaunch = {
+            startApp(info, view)
+            postDelayed({ if (hasWindowFocus()) playReturn() }, 1200)
+        })
     }
 
     private fun startApp(info: AppInfo, view: View) {
         val launcherApps = launcher.getSystemService(LauncherApps::class.java) ?: return
         val bounds = Rect()
         view.getGlobalVisibleRect(bounds)
-        val options = ActivityOptions.makeClipRevealAnimation(view, 0, 0, view.width, view.height).toBundle()
+        val options = AppOpen.options(launcher, view)
         runCatching {
             launcherApps.startMainActivity(info.componentName, info.user, bounds, options)
             info.componentName?.packageName?.let { app.lawnchair.metro.data.MetroUsage.recordLaunch(launcher, it) }

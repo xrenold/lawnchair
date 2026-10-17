@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pane: Start stays put while an app slides in over it (its tiles have already turned away). -->
+<alpha xmlns:android="http://schemas.android.com/apk/res/android"
+    android:fromAlpha="1" android:toAlpha="1" android:duration="240" />

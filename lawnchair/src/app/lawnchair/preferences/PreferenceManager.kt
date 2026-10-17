@@ -126,6 +126,8 @@ class PreferenceManager @Inject constructor(
     val metroLiveTiles = BoolPref("pref_metroLiveTiles", true, recreate)
     /** Background dim for legibility: 0 off, 1 auto, 2 auto + stronger. */
     val metroLegibility = IntPref("pref_metroLegibility", 1, recreate)
+    /** How apps open: "turnstile", "zoom" or "none" (see AppOpen). */
+    val metroLaunchAnimation = StringPref("pref_metroLaunchAnimation", "turnstile")
     /** Live tiles may show message text from notifications. */
     val metroMessagePeek = BoolPref("pref_metroMessagePeek", true)
     /** Serialized Start screen tiles (JSON). Managed by MetroTileStore. */

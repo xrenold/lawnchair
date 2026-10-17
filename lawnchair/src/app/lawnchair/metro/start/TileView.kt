@@ -153,11 +153,25 @@ class TileView(context: Context, override var tile: MetroTile) : android.widget.
         canvas.translate(0f, h - shadeH)
         canvas.drawRect(0f, 0f, w, shadeH, labelShade)
         canvas.restoreToCount(save)
-        labelPaint.textSize = spK(13f, 11.5f)
-        labelPaint.color = Color.WHITE
+        // The same footer as the notification side: the app's icon and name, the count on the right.
         val pad = dp(8f) * k
-        val text = TextUtils.ellipsize(label, labelPaint, w - pad * 2, TextUtils.TruncateAt.END)
-        canvas.drawText(text, 0, text.length, pad, h - pad - labelPaint.descent(), labelPaint)
+        labelPaint.textSize = spK(13f, 11f)
+        labelPaint.color = Color.WHITE
+        val footerIcon = dp(16f) * k
+        val baseline = h - pad - labelPaint.descent()
+        drawAppIcon(canvas, pad, h - pad - footerIcon, footerIcon, Color.WHITE)
+        val labelX = pad + footerIcon + dp(6f) * k
+        var countW = 0f
+        val count = live?.count ?: 0
+        if (count > 0 && live?.isMusic != true) {
+            countPaint.textSize = spK(13f, 11f)
+            countPaint.color = Color.WHITE
+            val t = countLabel(count)
+            countW = countPaint.measureText(t) + dp(6f)
+            canvas.drawText(t, w - pad - countPaint.measureText(t), baseline, countPaint)
+        }
+        val text = TextUtils.ellipsize(label, labelPaint, w - labelX - pad - countW, TextUtils.TruncateAt.END)
+        canvas.drawText(text, 0, text.length, labelX, baseline, labelPaint)
     }
 
     private fun updateWidgetFace() {

@@ -641,6 +641,26 @@ class LawnchairLauncher : QuickstepLauncher() {
         super.onActivityResult(requestCode, resultCode, data)
     }
 
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        when {
+            // In the background and Android is short of memory: give back everything that reloads.
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> {
+                app.lawnchair.metro.theme.MetroIcons.trim(all = true)
+                app.lawnchair.metro.info.PhotoSlideshow.trim()
+            }
+            // Pane just went out of sight (an app opened): keep half the icons, for coming back.
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> {
+                app.lawnchair.metro.theme.MetroIcons.trim(all = false)
+            }
+            // Running low while in front.
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ->
+                app.lawnchair.metro.info.PhotoSlideshow.trim()
+        }
+        app.lawnchair.metro.CrashLog.event("memory", "Android asked Pane to free memory (level $level)")
+    }
+
     override fun onPause() {
         super.onPause()
         app.lawnchair.metro.Watchdog.stop()

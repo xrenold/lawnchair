@@ -66,7 +66,19 @@ object MetroIcons {
         }
     }
 
-    private val cache = LruCache<String, Icon>(400)
+    /**
+     * Icons in memory, up to 16 MB (about 110 full-size icons): enough for Start and a screenful
+     * of the app list. Others come back quickly from the copies saved on the phone.
+     */
+    private val cache = object : LruCache<String, Icon>(16 * 1024) {
+        override fun sizeOf(key: String, value: Icon): Int = ((value.bitmap?.allocationByteCount ?: 0) / 1024).coerceAtLeast(1)
+    }
+
+    /** Frees icon memory: half when Pane is out of sight, all of it when memory is short. */
+    @JvmStatic
+    fun trim(all: Boolean) {
+        if (all) cache.evictAll() else cache.trimToSize(cache.maxSize() / 2)
+    }
     private val executor = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
     private const val RENDER_SIZE = 192

@@ -159,7 +159,10 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
         grid.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> scheduleBrands() }
 
         // Scrolling to tiles that got news while out of view starts their dwell.
-        scroller.setOnScrollChangeListener { _, _, _, _, _ -> markVisibleNews() }
+        scroller.setOnScrollChangeListener { _, _, _, _, _ ->
+            app.lawnchair.metro.info.PhotoSlideshow.onScroll()
+            markVisibleNews()
+        }
 
         // Pulling down past the top opens the notification shade.
         scroller.onPullPastTop = { openNotifications() }

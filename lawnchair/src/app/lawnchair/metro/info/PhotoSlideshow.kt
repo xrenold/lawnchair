@@ -29,6 +29,33 @@ import java.util.concurrent.Executors
  */
 class PhotoSlideshow(private val view: View) {
 
+    companion object {
+        private val all = java.util.Collections.newSetFromMap(java.util.WeakHashMap<PhotoSlideshow, Boolean>())
+
+        /** Until when Start is scrolling (uptime): the drift waits so scrolling gets the frames. */
+        @Volatile var scrollingUntil = 0L
+
+        /** Start scrolled: hold the drift for a moment. */
+        fun onScroll() {
+            scrollingUntil = android.os.SystemClock.uptimeMillis() + 250
+        }
+
+        /** Memory is short: drop the preloaded next photos (they load again when needed). */
+        fun trim() {
+            all.toList().forEach { it.dropNext() }
+        }
+    }
+
+    init {
+        all += this
+    }
+
+    private fun dropNext() {
+        if (phase == Phase.FADE) return // on screen right now
+        next = null
+        nextFaces = null
+    }
+
     private enum class Phase { DRIFT, FADE, STILL, ICON }
 
     private val main = Handler(Looper.getMainLooper())
@@ -247,7 +274,12 @@ class PhotoSlideshow(private val view: View) {
         // Only the drift and the fade need frames (about 30 a second is plenty); still and
         // resting phases don't redraw at all. Off screen, just check back now and then.
         if (animating) {
-            if (view.getLocalVisibleRect(visible)) view.postInvalidateDelayed(33) else view.postInvalidateDelayed(2000)
+            val wait = when {
+                !view.getLocalVisibleRect(visible) -> 2000L
+                android.os.SystemClock.uptimeMillis() < scrollingUntil -> 250L
+                else -> 33L
+            }
+            view.postInvalidateDelayed(wait)
         }
         // Only while the tile itself is still: a flip or landing on it should stay smooth.
         setSlowFrameRate(animating && view.rotationX == 0f && view.scaleX == 1f)

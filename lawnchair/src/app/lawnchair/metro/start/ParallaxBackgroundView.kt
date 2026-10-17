@@ -44,7 +44,23 @@ class ParallaxBackgroundView(context: Context) : View(context) {
         var sample = 1
         val targetH = (dm.heightPixels * (1 + travel)).toInt()
         while (opts.outWidth / (sample * 2) >= dm.widthPixels && opts.outHeight / (sample * 2) >= targetH) sample *= 2
-        bitmap = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample; inMutable = true })
+        val decoded = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample; inMutable = true })
+        // Halving steps often leave the photo up to twice as big as the screen needs: bring it
+        // down to just what the (larger than screen) background shows.
+        bitmap = decoded?.let { b ->
+            val needW = dm.widthPixels * (1 + travelX)
+            val needH = dm.heightPixels * (1 + travel)
+            val scale = maxOf(needW / b.width, needH / b.height)
+            if (scale >= 0.87f) {
+                b
+            } else {
+                runCatching {
+                    Bitmap.createScaledBitmap(b, (b.width * scale).toInt().coerceAtLeast(1), (b.height * scale).toInt().coerceAtLeast(1), true)
+                        .let { if (it.isMutable) it else it.copy(Bitmap.Config.ARGB_8888, true) }
+                        .also { if (it !== b) b.recycle() }
+                }.getOrDefault(b)
+            }
+        }
         dimBaked = false
         invalidate()
     }

@@ -258,7 +258,10 @@ class TileGridView(context: Context) : ViewGroup(context) {
         if (!staticValid || movers != staticMovers || staticW != width || staticH != height) {
             staticHoles.rewind()
             staticHoles.fillType = Path.FillType.EVEN_ODD
-            staticHoles.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
+            // Reaches a screen beyond each end: pulled past the top or bottom (the bounce), the
+            // space uncovered must stay black too.
+            val beyond = resources.displayMetrics.heightPixels.toFloat()
+            staticHoles.addRect(0f, -beyond, width.toFloat(), height + beyond, Path.Direction.CW)
             staticW = width
             staticH = height
             for (c in all) {

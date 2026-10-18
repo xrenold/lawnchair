@@ -769,6 +769,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     /** Back on Start after an app: tiles swing back in if they turned away, else they settle. */
     fun playComeBack() {
+        launchGuardUntil = 0L
         // Anything left mid-turn when Start was left lies flat again before the tiles come back.
         allTiles().forEach { it.settleTurn() }
         if (turnedAway) playReturn() else playLanding()
@@ -776,6 +777,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
 
     /** Called when Start becomes visible again after an app: tiles swing back in. */
     fun playReturn() {
+        launchGuardUntil = 0L
         if (!turnedAway) return
         turnedAway = false
         val all = grid.tiles
@@ -822,7 +824,30 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     }
 
     /** Opens the app on [view]: with the turnstile when that's the chosen animation. */
+    /**
+     * After a tap opens an app, further touches are ignored for a moment (rapid taps would
+     * otherwise land on tiles mid-animation and open things twice). Lifted early when the
+     * view comes back to rest.
+     */
+    private var launchGuardUntil = 0L
+    private var swallowing = false
+
+    private fun startLaunchGuard() {
+        launchGuardUntil = android.os.SystemClock.uptimeMillis() + 1000L
+    }
+
+    /** True if [ev] belongs to a touch that started during the launch guard. */
+    private fun swallowDuringLaunch(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            swallowing = android.os.SystemClock.uptimeMillis() < launchGuardUntil
+        }
+        val eat = swallowing
+        if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) swallowing = false
+        return eat
+    }
+
     private fun openTile(view: TileView) {
+        startLaunchGuard()
         if (!AppOpen.turnstile(launcher) || panel != null) {
             startApp(view)
             return
@@ -867,6 +892,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     }
 
     private fun openWidgetApp(view: WidgetTileView) {
+        startLaunchGuard()
         val app = MetroWidgets.appFor(launcher, view.tile.component) ?: return
         val bounds = Rect()
         view.getGlobalVisibleRect(bounds)
@@ -1447,6 +1473,7 @@ class StartView(private val launcher: LawnchairLauncher) : FrameLayout(launcher)
     // Watched here rather than in onInterceptTouchEvent: once the tiles start scrolling, the
     // scroller blocks interception, which would hide a sideways swipe from us.
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (swallowDuringLaunch(ev)) return true
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             lastTouchX = ev.x
             lastTouchY = ev.y

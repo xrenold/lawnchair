@@ -622,6 +622,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     /** Called when the launcher comes back from an app: rows swing back in. */
     fun playReturn() {
+        launchGuardUntil = 0L
         if (!isOpen || !turnedAway) return
         turnedAway = false
         val rows = visibleRows()
@@ -719,6 +720,7 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (swallowDuringLaunch(ev)) return true
         if (handleLeftEdge(ev)) return true
         // Swipe right-to-left on an app with notifications opens its panel (mirroring Start);
         // left-to-right still closes the list.
@@ -790,7 +792,30 @@ class AppListView(private val launcher: LawnchairLauncher) : FrameLayout(launche
 
     // ---- Actions ------------------------------------------------------------------------
 
+    /**
+     * After a tap opens an app, further touches are ignored for a moment (rapid taps would
+     * otherwise land on tiles mid-animation and open things twice). Lifted early when the
+     * view comes back to rest.
+     */
+    private var launchGuardUntil = 0L
+    private var swallowing = false
+
+    private fun startLaunchGuard() {
+        launchGuardUntil = android.os.SystemClock.uptimeMillis() + 1000L
+    }
+
+    /** True if [ev] belongs to a touch that started during the launch guard. */
+    private fun swallowDuringLaunch(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            swallowing = android.os.SystemClock.uptimeMillis() < launchGuardUntil
+        }
+        val eat = swallowing
+        if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) swallowing = false
+        return eat
+    }
+
     private fun launch(info: AppInfo, view: View) {
+        startLaunchGuard()
         hideKeyboard()
         if (!AppOpen.turnstile(launcher) || view === search) {
             startApp(info, view)

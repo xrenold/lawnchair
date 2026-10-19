@@ -181,6 +181,7 @@ class LawnchairLauncher : QuickstepLauncher() {
         super.onCreate(savedInstanceState)
         // Something may have replaced the crash handler since the app started: put it back.
         app.lawnchair.metro.CrashLog.ensureHandler()
+        app.lawnchair.metro.CrashLog.event("app", if (savedInstanceState != null) "home screen rebuilt (recreated)" else "home screen opened")
 
         if (MetroMode.isStartEnabled(this)) {
             addStartView()

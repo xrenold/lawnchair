@@ -101,7 +101,17 @@ object CrashLog {
                 android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "was closed by Android to free memory"
                 android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "was closed for using too much power or memory"
                 android.app.ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "failed to start"
-                else -> continue
+                // Ordinary ends: Pane updated, closed from settings or Recents, or restarting itself.
+                android.app.ApplicationExitInfo.REASON_EXIT_SELF,
+                android.app.ApplicationExitInfo.REASON_USER_REQUESTED,
+                android.app.ApplicationExitInfo.REASON_USER_STOPPED,
+                android.app.ApplicationExitInfo.REASON_PACKAGE_UPDATED,
+                android.app.ApplicationExitInfo.REASON_PACKAGE_STATE_CHANGE,
+                android.app.ApplicationExitInfo.REASON_PERMISSION_CHANGE,
+                -> continue
+                // Anything else (killed by a signal, "other": phone makers' own memory killers
+                // often report this way) is worth a report too.
+                else -> "was closed by Android (reason ${e.reason}, status ${e.status})"
             }
             val trace = if (e.reason == android.app.ApplicationExitInfo.REASON_ANR) {
                 // The main thread's stack shows what it was stuck on.

@@ -638,7 +638,14 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         // Metro's widget bind / setup results come back here.
-        if (app.lawnchair.metro.widgets.MetroWidgets.onActivityResult(this, requestCode, resultCode)) return
+        if (app.lawnchair.metro.widgets.MetroWidgets.onActivityResult(this, requestCode, resultCode)) {
+            // Launcher3 remembers the request it's waiting on, and on every return to the home
+            // screen it cancels it and reopens its relay screen while one is still set. It's
+            // cleared only in its own handler, so clear it here: left set, it looped until Android
+            // closed Pane ("rapidActivityLaunch").
+            mPendingActivityRequestCode = -1
+            return
+        }
         super.onActivityResult(requestCode, resultCode, data)
     }
 

@@ -39,7 +39,36 @@ object MetroWidgets {
     private data class Pending(val id: Int, val info: AppWidgetProviderInfo, val replaceTileId: Long?)
 
     private var host: AppWidgetHost? = null
+
+    /**
+     * The widget being added. Also kept on disk: Android may close Pane to free memory while
+     * the widget's setup screen is open, and the result then comes back to a fresh Pane.
+     */
     private var pending: Pending? = null
+        set(value) {
+            field = value
+            val p = appContext?.getSharedPreferences("metro_widget_pending", Context.MODE_PRIVATE) ?: return
+            if (value == null) {
+                p.edit().clear().apply()
+            } else {
+                p.edit().putInt("id", value.id).putLong("tile", value.replaceTileId ?: -1L).apply()
+            }
+        }
+    private var appContext: Context? = null
+
+    /** The widget being added, from memory or (after Pane was closed meanwhile) from disk. */
+    private fun pendingOrSaved(context: Context): Pending? {
+        pending?.let { return it }
+        val p = context.getSharedPreferences("metro_widget_pending", Context.MODE_PRIVATE)
+        val id = p.getInt("id", 0).takeIf { it != 0 } ?: return null
+        val info = AppWidgetManager.getInstance(context).getAppWidgetInfo(id) ?: return null
+        val tile = p.getLong("tile", -1L).takeIf { it >= 0 }
+        CrashLog.event(TAG, "picking up widget $id after Pane was closed during its setup")
+        return Pending(id, info, tile).also {
+            appContext = context.applicationContext
+            pending = it
+        }
+    }
 
     fun host(context: Context): AppWidgetHost =
         host ?: PaneWidgetHost(context.applicationContext, HOST_ID).also { host = it }
@@ -116,6 +145,7 @@ object MetroWidgets {
      */
     fun add(activity: Activity, info: AppWidgetProviderInfo, forTileId: Long? = null) {
         val replaceTileId = forTileId
+        appContext = activity.applicationContext
         val id = host(activity).allocateAppWidgetId()
         pending = Pending(id, info, replaceTileId)
         CrashLog.event(TAG, "adding ${info.provider.flattenToShortString()} as $id")
@@ -174,7 +204,7 @@ object MetroWidgets {
 
     /** Routes the bind / configure results. Returns true if the result was ours. */
     fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int): Boolean {
-        if ((requestCode == REQUEST_BIND || requestCode == REQUEST_CONFIGURE) && pending == null) {
+        if ((requestCode == REQUEST_BIND || requestCode == REQUEST_CONFIGURE) && pendingOrSaved(activity) == null) {
             // Pane was closed while the other screen was up: the widget being added is lost.
             CrashLog.event(TAG, "result $resultCode for a widget no longer pending")
             return true
